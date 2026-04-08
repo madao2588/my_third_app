@@ -1,0 +1,3 @@
+server/storage/snapshots/** linguist-generated=true
+frontend/web/** linguist-generated=true
+frontend/build/** linguist-generated=true
