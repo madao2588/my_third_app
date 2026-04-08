@@ -112,8 +112,8 @@ class _KeywordRulesPageState extends State<KeywordRulesPage> {
                         decoration: BoxDecoration(
                           color: Colors.white,
                           borderRadius: BorderRadius.circular(12),
-                          border:
-                              Border.all(color: Colors.grey.withValues(alpha: 0.2)),
+                          border: Border.all(
+                              color: Colors.grey.withValues(alpha: 0.2)),
                         ),
                         child: SingleChildScrollView(
                           scrollDirection: Axis.horizontal,
