@@ -1,0 +1,11 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: server/Dockerfile
+    container_name: crawler_system_app
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./server/storage:/app/server/storage
+      - ./server/data.db:/app/server/data.db

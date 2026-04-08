@@ -1,0 +1,53 @@
+[
+  {
+    "id": "news_article",
+    "label": "News Article",
+    "name": "News Monitor",
+    "start_url": "https://example.com/news",
+    "cron_expr": "0 */6 * * *",
+    "parser_rules": null,
+    "enabled": true,
+    "description": "General article pages with readability fallback.",
+    "tags": [
+      "readability",
+      "article",
+      "general"
+    ],
+    "usage_count": 1,
+    "last_used_at": "2026-04-07T08:22:20.139476+00:00"
+  },
+  {
+    "id": "tender_notice",
+    "label": "Tender Notice",
+    "name": "Tender Notice Monitor",
+    "start_url": "https://example.com/tenders",
+    "cron_expr": "0 */2 * * *",
+    "parser_rules": "{\"title_selector\":\"h1\",\"content_selector\":\".article-content\"}",
+    "enabled": true,
+    "description": "Stable detail pages for bidding and procurement notices.",
+    "tags": [
+      "tender",
+      "bidding",
+      "detail-page"
+    ],
+    "usage_count": 0,
+    "last_used_at": null
+  },
+  {
+    "id": "portal_announcement",
+    "label": "Portal Announcement",
+    "name": "Portal Announcement Monitor",
+    "start_url": "https://example.com/announcements",
+    "cron_expr": "0 8,12,16 * * *",
+    "parser_rules": "{\"title_selector\":\".detail-title\",\"content_selector\":\".detail-body\"}",
+    "enabled": true,
+    "description": "A good baseline for enterprise or government notice portals.",
+    "tags": [
+      "portal",
+      "announcement",
+      "structured"
+    ],
+    "usage_count": 0,
+    "last_used_at": null
+  }
+]

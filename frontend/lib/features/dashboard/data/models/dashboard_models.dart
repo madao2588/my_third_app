@@ -1,0 +1,104 @@
+import '../../../notices/data/models/notice_models.dart';
+
+class DashboardMetricsModel {
+  final int todayNewNotices;
+  final int keywordHitNotices;
+  final int monitoringSiteCount;
+  final int highPriorityNotices;
+
+  const DashboardMetricsModel({
+    required this.todayNewNotices,
+    required this.keywordHitNotices,
+    required this.monitoringSiteCount,
+    required this.highPriorityNotices,
+  });
+
+  factory DashboardMetricsModel.fromJson(Map<String, dynamic> json) {
+    return DashboardMetricsModel(
+      todayNewNotices: json['today_new_notices'] as int? ?? 0,
+      keywordHitNotices: json['keyword_hit_notices'] as int? ?? 0,
+      monitoringSiteCount: json['monitoring_site_count'] as int? ?? 0,
+      highPriorityNotices: json['high_priority_notices'] as int? ?? 0,
+    );
+  }
+}
+
+class KeywordHeatItemModel {
+  final String keyword;
+  final int count;
+
+  const KeywordHeatItemModel({
+    required this.keyword,
+    required this.count,
+  });
+
+  factory KeywordHeatItemModel.fromJson(Map<String, dynamic> json) {
+    return KeywordHeatItemModel(
+      keyword: json['keyword']?.toString() ?? '',
+      count: json['count'] as int? ?? 0,
+    );
+  }
+}
+
+class SourceDistributionItemModel {
+  final String sourceSite;
+  final int noticeCount;
+  final double percentage;
+
+  const SourceDistributionItemModel({
+    required this.sourceSite,
+    required this.noticeCount,
+    required this.percentage,
+  });
+
+  factory SourceDistributionItemModel.fromJson(Map<String, dynamic> json) {
+    return SourceDistributionItemModel(
+      sourceSite: json['source_site']?.toString() ?? '',
+      noticeCount: json['notice_count'] as int? ?? 0,
+      percentage: (json['percentage'] as num?)?.toDouble() ?? 0,
+    );
+  }
+}
+
+class DashboardOverviewModel {
+  final DashboardMetricsModel metrics;
+  final List<NoticeListItemModel> highValueNotices;
+  final List<NoticeListItemModel> recentNotices;
+  final List<KeywordHeatItemModel> keywordHeat;
+  final List<SourceDistributionItemModel> sourceDistribution;
+  final String? lastUpdatedAt;
+
+  const DashboardOverviewModel({
+    required this.metrics,
+    required this.highValueNotices,
+    required this.recentNotices,
+    required this.keywordHeat,
+    required this.sourceDistribution,
+    required this.lastUpdatedAt,
+  });
+
+  factory DashboardOverviewModel.fromJson(Map<String, dynamic> json) {
+    return DashboardOverviewModel(
+      metrics: DashboardMetricsModel.fromJson(
+        json['metrics'] as Map<String, dynamic>? ?? {},
+      ),
+      highValueNotices: (json['high_value_notices'] as List<dynamic>? ?? [])
+          .whereType<Map<String, dynamic>>()
+          .map(NoticeListItemModel.fromJson)
+          .toList(),
+      recentNotices: (json['recent_notices'] as List<dynamic>? ?? [])
+          .whereType<Map<String, dynamic>>()
+          .map(NoticeListItemModel.fromJson)
+          .toList(),
+      keywordHeat: (json['keyword_heat'] as List<dynamic>? ?? [])
+          .whereType<Map<String, dynamic>>()
+          .map(KeywordHeatItemModel.fromJson)
+          .toList(),
+      sourceDistribution: (json['source_distribution'] as List<dynamic>? ?? [])
+          .whereType<Map<String, dynamic>>()
+          .map(SourceDistributionItemModel.fromJson)
+          .toList(),
+      lastUpdatedAt: json['last_updated_at']?.toString(),
+    );
+  }
+}
