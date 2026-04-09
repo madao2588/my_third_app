@@ -10,4 +10,6 @@ abstract class TemplateRepository {
   Future<void> deleteTaskTemplate(String templateId);
 
   Future<TaskTemplateModel> trackTaskTemplateUse(String templateId);
+
+  Future<TestTemplateResponse> testTaskTemplate(TestTemplateRequest request);
 }

@@ -59,3 +59,46 @@ class TaskTemplateModel {
     };
   }
 }
+
+class TestTemplateRequest {
+  final String startUrl;
+  final String? parserRules;
+
+  const TestTemplateRequest({
+    required this.startUrl,
+    this.parserRules,
+  });
+
+  Map<String, dynamic> toJson() {
+    return {
+      'start_url': startUrl,
+      if (parserRules != null) 'parser_rules': parserRules,
+    };
+  }
+}
+
+class TestTemplateResponse {
+  final String? title;
+  final String? contentText;
+  final String? contentHtml;
+  final int? qualityScore;
+  final String? error;
+
+  const TestTemplateResponse({
+    this.title,
+    this.contentText,
+    this.contentHtml,
+    this.qualityScore,
+    this.error,
+  });
+
+  factory TestTemplateResponse.fromJson(Map<String, dynamic> json) {
+    return TestTemplateResponse(
+      title: json['title']?.toString(),
+      contentText: json['content_text']?.toString(),
+      contentHtml: json['content_html']?.toString(),
+      qualityScore: json['quality_score'] as int?,
+      error: json['error']?.toString(),
+    );
+  }
+}

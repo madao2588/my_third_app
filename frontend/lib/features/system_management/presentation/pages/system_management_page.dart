@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../../../../core/network/api_client.dart';
+import '../../../../core/utils/date_formatter.dart';
 import '../../../../shared/models/page_data.dart';
 import '../../data/models/task_models.dart';
 import '../../data/models/task_template_models.dart';
@@ -39,8 +40,11 @@ class _SystemManagementPageState extends State<SystemManagementPage> {
   late final TextEditingController _searchController;
   late final TextEditingController _logTaskIdController;
   late final TextEditingController _logSearchController;
-  late final ScrollController _taskTableScrollController;
+  late final ScrollController _taskTableHorizontalScrollController;
+  late final ScrollController _taskTableVerticalScrollController;
+  Timer? _autoRefreshTimer;
   Timer? _listPollingTimer;
+  bool _isAutoRefreshing = false;
   int _remainingPollTicks = 0;
   int _selectedTabIndex = 0;
   int _taskPage = 1;
@@ -60,10 +64,12 @@ class _SystemManagementPageState extends State<SystemManagementPage> {
     _searchController = TextEditingController();
     _logTaskIdController = TextEditingController();
     _logSearchController = TextEditingController();
-    _taskTableScrollController = ScrollController();
+    _taskTableHorizontalScrollController = ScrollController();
+    _taskTableVerticalScrollController = ScrollController();
     _tasksFuture = _fetchTasks();
     _logsFuture = _fetchLogs();
     _logSummaryFuture = _repository.fetchLogSummary();
+    _startAutoRefresh();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _consumePendingTemplateIfNeeded();
     });
@@ -85,7 +91,9 @@ class _SystemManagementPageState extends State<SystemManagementPage> {
     _searchController.dispose();
     _logTaskIdController.dispose();
     _logSearchController.dispose();
-    _taskTableScrollController.dispose();
+    _taskTableHorizontalScrollController.dispose();
+    _taskTableVerticalScrollController.dispose();
+    _autoRefreshTimer?.cancel();
     _listPollingTimer?.cancel();
     super.dispose();
   }
@@ -103,6 +111,26 @@ class _SystemManagementPageState extends State<SystemManagementPage> {
       _logSummaryFuture = _repository.fetchLogSummary();
     });
     await Future.wait([_logsFuture, _logSummaryFuture]);
+  }
+
+  void _startAutoRefresh() {
+    _autoRefreshTimer?.cancel();
+    _autoRefreshTimer = Timer.periodic(const Duration(seconds: 5), (_) async {
+      if (!mounted || _isAutoRefreshing) {
+        return;
+      }
+
+      _isAutoRefreshing = true;
+      try {
+        if (_selectedTabIndex == 0) {
+          await _refresh();
+        } else {
+          await _refreshLogs();
+        }
+      } finally {
+        _isAutoRefreshing = false;
+      }
+    });
   }
 
   Future<PageData<TaskListItemModel>> _fetchTasks() {
@@ -744,31 +772,39 @@ class _SystemManagementPageState extends State<SystemManagementPage> {
 
     return Card(
       child: Scrollbar(
-        controller: _taskTableScrollController,
+        controller: _taskTableVerticalScrollController,
         thumbVisibility: true,
-        trackVisibility: true,
-        notificationPredicate: (notification) =>
-            notification.metrics.axis == Axis.horizontal,
         child: SingleChildScrollView(
-          controller: _taskTableScrollController,
-          scrollDirection: Axis.horizontal,
-          child: Padding(
-            padding: const EdgeInsets.all(8),
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(minWidth: 1180),
-              child: DataTable(
-                columnSpacing: 20,
-                columns: const [
-                  DataColumn(label: Text('名称')),
-                  DataColumn(label: Text('地址')),
-                  DataColumn(label: Text('定时')),
-                  DataColumn(label: Text('状态')),
-                  DataColumn(label: Text('最近运行')),
-                  DataColumn(label: Text('最近结果')),
-                  DataColumn(label: Text('创建时间')),
-                  DataColumn(label: Text('操作')),
-                ],
-                rows: tasks.map(_buildTaskRow).toList(),
+          controller: _taskTableVerticalScrollController,
+          child: Scrollbar(
+            controller: _taskTableHorizontalScrollController,
+            thumbVisibility: true,
+            trackVisibility: true,
+            notificationPredicate: (notification) =>
+                notification.metrics.axis == Axis.horizontal,
+            scrollbarOrientation: ScrollbarOrientation.bottom,
+            child: SingleChildScrollView(
+              controller: _taskTableHorizontalScrollController,
+              scrollDirection: Axis.horizontal,
+              child: Padding(
+                padding: const EdgeInsets.all(8),
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(minWidth: 1180),
+                  child: DataTable(
+                    columnSpacing: 20,
+                    columns: const [
+                      DataColumn(label: Text('名称')),
+                      DataColumn(label: Text('地址')),
+                      DataColumn(label: Text('定时')),
+                      DataColumn(label: Text('状态')),
+                      DataColumn(label: Text('最近运行')),
+                      DataColumn(label: Text('最近结果')),
+                      DataColumn(label: Text('创建时间')),
+                      DataColumn(label: Text('操作')),
+                    ],
+                    rows: tasks.map(_buildTaskRow).toList(),
+                  ),
+                ),
               ),
             ),
           ),
@@ -809,7 +845,7 @@ class _SystemManagementPageState extends State<SystemManagementPage> {
         ),
         DataCell(Text(_displayValue(task.lastRunAt))),
         DataCell(_TaskResultCell(task: task)),
-        DataCell(Text(task.createdAt)),
+        DataCell(Text(_displayValue(task.createdAt))),
         DataCell(
           SizedBox(
             width: 280,
@@ -1003,7 +1039,10 @@ class _SystemManagementPageState extends State<SystemManagementPage> {
                           spacing: 8,
                           runSpacing: 8,
                           children: [
-                            _InlineMetaChip(label: '时间', value: log.createdAt),
+                            _InlineMetaChip(
+                              label: '时间',
+                              value: _displayValue(log.createdAt),
+                            ),
                             _InlineMetaChip(
                               label: '任务 ID',
                               value: log.taskId?.toString() ?? '系统',
@@ -1565,10 +1604,7 @@ String _statusLabel(String status) {
 }
 
 String _displayValue(String? value) {
-  if (value == null || value.isEmpty) {
-    return '-';
-  }
-  return value;
+  return DateFormatter.formatDateTime(value);
 }
 
 class _TaskEditorDialog extends StatefulWidget {
@@ -2054,7 +2090,7 @@ class _TaskDetailsDialogState extends State<_TaskDetailsDialog> {
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 const SizedBox(height: 4),
-                                Text(log.createdAt),
+                                Text(_displayValue(log.createdAt)),
                                 if (log.errorStack != null &&
                                     log.errorStack!.isNotEmpty) ...[
                                   const SizedBox(height: 8),

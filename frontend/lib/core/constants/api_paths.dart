@@ -5,6 +5,7 @@ class ApiPaths {
   static const logs = '/v1/logs';
   static const logSummary = '/v1/logs/summary';
   static const taskTemplates = '/v1/templates/tasks';
+  static const testTemplate = '/v1/templates/test';
   static const statsOverview = '/v1/stats/overview';
 
   static String noticeDetail(int id) => '/v1/notices/$id';

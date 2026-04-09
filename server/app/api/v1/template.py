@@ -2,11 +2,24 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from app.dependencies import get_template_service
 from app.schemas.common import ApiResponse, EmptyPayload
-from app.schemas.template import TaskTemplateCreate, TaskTemplateRead, TaskTemplateUpdate
+from app.schemas.template import (
+    TaskTemplateCreate, 
+    TaskTemplateRead, 
+    TaskTemplateUpdate,
+    TestTemplateRequest,
+    TestTemplateResponse
+)
 from app.services.template_service import TemplateService
+from app.engine.test_pipeline import test_run
 
 router = APIRouter(prefix="/templates", tags=["templates"])
 
+@router.post("/test", response_model=ApiResponse[TestTemplateResponse])
+async def test_template_rules(
+    payload: TestTemplateRequest,
+) -> ApiResponse[TestTemplateResponse]:
+    result = await test_run(payload.start_url, payload.parser_rules)
+    return ApiResponse(data=TestTemplateResponse(**result))
 
 @router.get("/tasks", response_model=ApiResponse[list[TaskTemplateRead]])
 async def list_task_templates(

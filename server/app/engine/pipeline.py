@@ -30,14 +30,6 @@ async def run_task(task_id: int) -> None:
             )
             raise ValueError(f"Task {task_id} not found")
 
-        if int(task.status) != int(TaskStatus.ENABLED):
-            await log_repo.create(
-                level="INFO",
-                task_id=task_id,
-                message=f"Task {task_id} is disabled, skipping execution",
-            )
-            return
-
         try:
             html = await _download_page(url=task.start_url, log_repo=log_repo, task_id=task_id)
             parsed = await _parse_page(

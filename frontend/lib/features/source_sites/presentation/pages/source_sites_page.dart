@@ -459,6 +459,8 @@ class _TemplateEditorDialogState extends State<_TemplateEditorDialog> {
   late bool _enabled;
   bool _submitting = false;
   String? _submitError;
+  bool _testing = false;
+  String? _testResult;
 
   @override
   void initState() {
@@ -497,6 +499,7 @@ class _TemplateEditorDialogState extends State<_TemplateEditorDialog> {
     setState(() {
       _submitting = true;
       _submitError = null;
+      _testResult = null;
     });
 
     final template = TaskTemplateModel(
@@ -547,6 +550,65 @@ class _TemplateEditorDialogState extends State<_TemplateEditorDialog> {
       return null;
     }
     return trimmed;
+  }
+
+  Future<void> _testTemplate() async {
+    setState(() {
+      _submitError = null;
+      _testResult = null;
+    });
+
+    final startUrl = _urlController.text.trim();
+    if (startUrl.isEmpty ||
+        (!startUrl.startsWith('http://') && !startUrl.startsWith('https://'))) {
+      setState(() {
+        _submitError = '请先填写合法的起始地址';
+      });
+      return;
+    }
+
+    setState(() {
+      _testing = true;
+    });
+
+    try {
+      final req = TestTemplateRequest(
+        startUrl: startUrl,
+        parserRules: _nullableText(_rulesController.text),
+      );
+      final res = await widget.repository.testTaskTemplate(req);
+      if (!mounted) return;
+
+      setState(() {
+        if (res.error != null) {
+          _testResult = '测试出错：\n${res.error}';
+        } else {
+          final contentPreview = res.contentText != null
+              ? (res.contentText!.length > 300
+                  ? '${res.contentText!.substring(0, 300)}...\n[剩余内容已截断]'
+                  : res.contentText!)
+              : '无';
+          _testResult = '测试成功：\n'
+              '标题：${res.title ?? '未提取到标题'}\n'
+              '质量分：${res.qualityScore ?? 0}\n'
+              '正文长度：${res.contentText?.length ?? 0} 字符\n'
+              'HTML长度：${res.contentHtml?.length ?? 0} 字符\n'
+              '------------------------------\n'
+              '正文预览：\n$contentPreview';
+        }
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _testResult = '请求异常：$e';
+      });
+    } finally {
+      if (mounted) {
+        setState(() {
+          _testing = false;
+        });
+      }
+    }
   }
 
   @override
@@ -650,19 +712,49 @@ class _TemplateEditorDialogState extends State<_TemplateEditorDialog> {
                     style: const TextStyle(color: Color(0xFFB3261E)),
                   ),
                 ],
+                if (_testing) ...[
+                  const SizedBox(height: 16),
+                  const Center(child: CircularProgressIndicator()),
+                ] else if (_testResult != null) ...[
+                  const SizedBox(height: 16),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFF0F5FF),
+                      border: Border.all(
+                          color:
+                              const Color(0xFF1E4F8A).withValues(alpha: 0.2)),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: SelectableText(
+                      _testResult!,
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            fontFamily: 'Courier',
+                            height: 1.5,
+                          ),
+                    ),
+                  ),
+                ],
               ],
             ),
           ),
         ),
       ),
       actions: [
+        OutlinedButton.icon(
+          onPressed: _testing || _submitting ? null : _testTemplate,
+          icon: const Icon(Icons.bug_report, size: 18),
+          label: const Text('在线测试'),
+        ),
         TextButton(
-          onPressed:
-              _submitting ? null : () => Navigator.of(context).pop(false),
+          onPressed: _submitting || _testing
+              ? null
+              : () => Navigator.of(context).pop(false),
           child: const Text('取消'),
         ),
         FilledButton(
-          onPressed: _submitting ? null : _submit,
+          onPressed: _submitting || _testing ? null : _submit,
           child: Text(_submitting ? '保存中...' : '保存'),
         ),
       ],

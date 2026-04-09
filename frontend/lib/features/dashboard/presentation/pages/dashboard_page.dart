@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../../../core/network/api_client.dart';
+import '../../../../core/utils/date_formatter.dart';
 import '../../data/models/dashboard_models.dart';
 import '../../data/repositories/http_dashboard_repository.dart';
 import '../../../notices/data/models/notice_models.dart';
@@ -505,7 +506,7 @@ class _DashboardHero extends StatelessWidget {
               _InfoChip(
                 label: lastUpdatedAt == null || lastUpdatedAt!.isEmpty
                     ? '待更新'
-                    : '更新于 ${_formatDate(lastUpdatedAt!)}',
+                    : '更新于 ${DateFormatter.formatDateTime(lastUpdatedAt!)}',
                 color: const Color(0x1AFFFFFF),
                 textColor: Colors.white,
                 borderColor: const Color(0x33FFFFFF),
@@ -662,7 +663,7 @@ class _RecentNoticeList extends StatelessWidget {
                         Text(
                           item.sourceSite.isEmpty
                               ? '来源未知'
-                              : '${item.sourceSite} · ${_shortDate(item.capturedAt)}',
+                              : '${item.sourceSite} · ${DateFormatter.formatShortDate(item.capturedAt)}',
                           style: Theme.of(context).textTheme.bodyMedium,
                         ),
                       ],
@@ -804,26 +805,4 @@ class _InfoChip extends StatelessWidget {
       ),
     );
   }
-}
-
-String _formatDate(String value) {
-  final parsed = DateTime.tryParse(value);
-  if (parsed == null) {
-    return value;
-  }
-
-  String twoDigits(int number) => number.toString().padLeft(2, '0');
-  final local = parsed.toLocal();
-  return '${local.year}-${twoDigits(local.month)}-${twoDigits(local.day)} ${twoDigits(local.hour)}:${twoDigits(local.minute)}';
-}
-
-String _shortDate(String value) {
-  final parsed = DateTime.tryParse(value);
-  if (parsed == null) {
-    return value;
-  }
-
-  String twoDigits(int number) => number.toString().padLeft(2, '0');
-  final local = parsed.toLocal();
-  return '${twoDigits(local.month)}-${twoDigits(local.day)}';
 }

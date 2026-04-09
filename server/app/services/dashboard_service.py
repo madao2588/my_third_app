@@ -23,8 +23,16 @@ class DashboardService:
         self.notice_service = NoticeService(data_repo=data_repo, keyword_repo=keyword_repo)
 
     async def get_overview(self) -> DashboardOverview:
-        recent_items, _ = await self.data_repo.list_paginated(page=1, page_size=20)
-        all_items, _ = await self.data_repo.list_paginated(page=1, page_size=500)
+        recent_items, _ = await self.data_repo.list_paginated(
+            page=1,
+            page_size=20,
+            enabled_only=True,
+        )
+        all_items, _ = await self.data_repo.list_paginated(
+            page=1,
+            page_size=500,
+            enabled_only=True,
+        )
         enabled_tasks = await self.task_repo.list_enabled()
 
         active_kws, high_pri_kws = await self.notice_service._get_keyword_lists()
@@ -45,7 +53,7 @@ class DashboardService:
 
         return DashboardOverview(
             metrics=DashboardMetrics(
-                today_new_notices=await self.data_repo.count_today(),
+                today_new_notices=await self.data_repo.count_today(enabled_only=True),
                 keyword_hit_notices=keyword_hit_notices,
                 monitoring_site_count=max(len(enabled_tasks), len(source_distribution)),
                 high_priority_notices=high_priority_notices,

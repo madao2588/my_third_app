@@ -7,6 +7,7 @@ from app.repositories.log_repo import LogRepository
 from app.repositories.task_repo import TaskRepository
 from app.schemas.task import TaskRunPayload
 
+_background_tasks = set()
 
 class CrawlService:
     def __init__(self, task_repo: TaskRepository, log_repo: LogRepository):
@@ -86,7 +87,9 @@ class CrawlService:
             last_run_status="queued",
             last_error_message=None,
         )
-        asyncio.create_task(dispatch_task_run(task_id))
+        task_coro = asyncio.create_task(dispatch_task_run(task_id))
+        _background_tasks.add(task_coro)
+        task_coro.add_done_callback(_background_tasks.discard)
         return TaskRunPayload(task_id=task_id, status="queued")
 
 

@@ -25,7 +25,12 @@ class NoticeService:
         return active, high_priority
 
     async def list_notices(self, *, page: int, page_size: int, keyword: str | None = None) -> PageData[NoticeListItem]:
-        items, total = await self.data_repo.list_paginated(page=page, page_size=page_size, keyword=keyword)
+        items, total = await self.data_repo.list_paginated(
+            page=page,
+            page_size=page_size,
+            keyword=keyword,
+            enabled_only=True,
+        )
         active_kws, high_pri_kws = await self._get_keyword_lists()
         notices = [self._to_notice_list_item(item, active_kws, high_pri_kws) for item in items]
         return PageData[NoticeListItem](

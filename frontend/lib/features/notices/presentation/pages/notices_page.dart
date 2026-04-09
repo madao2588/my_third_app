@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../../../../core/network/api_client.dart';
+import '../../../../core/utils/date_formatter.dart';
 import '../../../../shared/models/page_data.dart';
 import '../../data/models/notice_models.dart';
 import '../../data/repositories/http_notice_repository.dart';
@@ -19,6 +20,7 @@ class _NoticesPageState extends State<NoticesPage> {
   late Future<PageData<NoticeListItemModel>> _noticesFuture;
   Future<NoticeDetailModel>? _detailFuture;
   int? _selectedNoticeId;
+  Timer? _autoRefreshTimer;
   final ScrollController _horizontalScrollController = ScrollController();
   final TextEditingController _searchController = TextEditingController();
 
@@ -28,6 +30,7 @@ class _NoticesPageState extends State<NoticesPage> {
 
   @override
   void dispose() {
+    _autoRefreshTimer?.cancel();
     _searchController.dispose();
     _horizontalScrollController.dispose();
     super.dispose();
@@ -38,6 +41,7 @@ class _NoticesPageState extends State<NoticesPage> {
     super.initState();
     _repository = HttpNoticeRepository(apiClient: ApiClient());
     _noticesFuture = _fetchPage();
+    _startAutoRefresh();
   }
 
   Future<PageData<NoticeListItemModel>> _fetchPage() {
@@ -69,6 +73,26 @@ class _NoticesPageState extends State<NoticesPage> {
       _noticesFuture = _fetchPage();
     });
     await _noticesFuture;
+  }
+
+  Future<void> _refreshCurrentPage() async {
+    setState(() {
+      _noticesFuture = _fetchPage();
+      if (_selectedNoticeId != null) {
+        _detailFuture = _repository.fetchNoticeDetail(_selectedNoticeId!);
+      }
+    });
+    await _noticesFuture;
+  }
+
+  void _startAutoRefresh() {
+    _autoRefreshTimer?.cancel();
+    _autoRefreshTimer = Timer.periodic(const Duration(seconds: 10), (_) async {
+      if (!mounted) {
+        return;
+      }
+      await _refreshCurrentPage();
+    });
   }
 
   void _selectNotice(int noticeId) {
@@ -763,7 +787,10 @@ class _NoticeListOnlyState extends State<_NoticeListOnly> {
                         runSpacing: 8,
                         children: [
                           _InfoPill(label: '来源', value: item.sourceSite),
-                          _InfoPill(label: '采集时间', value: item.capturedAt),
+                          _InfoPill(
+                            label: '采集时间',
+                            value: DateFormatter.formatDateTime(item.capturedAt),
+                          ),
                           _InfoPill(
                               label: '质量分', value: '${item.qualityScore}'),
                         ],
@@ -867,11 +894,19 @@ class _NoticeDetailPanelState extends State<_NoticeDetailPanel> {
                     runSpacing: 8,
                     children: [
                       _MetaTag(label: '来源站点', value: detail.sourceSite),
-                      _MetaTag(label: '采集时间', value: detail.capturedAt),
+                      _MetaTag(
+                        label: '采集时间',
+                        value: DateFormatter.formatDateTime(detail.capturedAt),
+                      ),
                       _MetaTag(label: '质量分', value: '${detail.qualityScore}'),
                       _MetaTag(
                         label: '发布时间',
-                        value: detail.publishedAt ?? '暂无',
+                        value: detail.publishedAt == null
+                            ? '暂无'
+                            : DateFormatter.formatDateTime(
+                                detail.publishedAt,
+                                fallback: '暂无',
+                              ),
                       ),
                     ],
                   ),

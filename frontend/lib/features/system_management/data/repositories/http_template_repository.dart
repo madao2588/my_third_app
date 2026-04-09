@@ -88,4 +88,20 @@ class HttpTemplateRepository implements TemplateRepository {
           lastUsedAt: null,
         );
   }
+
+  @override
+  Future<TestTemplateResponse> testTaskTemplate(
+      TestTemplateRequest request) async {
+    final json = await apiClient.postJson(
+      ApiPaths.testTemplate,
+      body: request.toJson(),
+    );
+    final response = ApiResponse<TestTemplateResponse>.fromJson(
+      json,
+      (rawData) => TestTemplateResponse.fromJson(
+        rawData as Map<String, dynamic>? ?? {},
+      ),
+    );
+    return response.data ?? const TestTemplateResponse();
+  }
 }

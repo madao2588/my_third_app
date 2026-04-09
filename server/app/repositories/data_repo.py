@@ -5,6 +5,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.data import CollectedData
+from app.models.task import Task
 
 
 class DataRepository:
@@ -69,6 +70,7 @@ class DataRepository:
         page_size: int,
         task_id: int | None = None,
         keyword: str | None = None,
+        enabled_only: bool = False,
     ) -> tuple[Sequence[CollectedData], int]:
         from sqlalchemy import or_
         filters = []
@@ -81,16 +83,21 @@ class DataRepository:
                     CollectedData.content_text.ilike(f'%{keyword}%')
                 )
             )
+        if enabled_only:
+            filters.append(Task.status == 1)
 
         total_statement = select(func.count()).select_from(CollectedData)
+        statement = select(CollectedData)
+        if enabled_only:
+            total_statement = total_statement.join(Task, Task.id == CollectedData.task_id)
+            statement = statement.join(Task, Task.id == CollectedData.task_id)
         if filters:
             total_statement = total_statement.where(*filters)
         total = await self.session.scalar(total_statement) or 0
 
         statement = (
-            select(CollectedData)
-            .where(*filters)
-            .order_by(CollectedData.id.desc())
+            statement.where(*filters)
+            .order_by(CollectedData.fetch_time.desc(), CollectedData.id.desc())
             .offset((page - 1) * page_size)
             .limit(page_size)
         )
@@ -112,11 +119,14 @@ class DataRepository:
         statement = select(func.count()).select_from(CollectedData)
         return await self.session.scalar(statement) or 0
 
-    async def count_today(self) -> int:
+    async def count_today(self, *, enabled_only: bool = False) -> int:
         today = date.today().isoformat()
-        statement = select(func.count()).select_from(CollectedData).where(
-            func.date(CollectedData.fetch_time) == today
-        )
+        statement = select(func.count()).select_from(CollectedData)
+        if enabled_only:
+            statement = statement.join(Task, Task.id == CollectedData.task_id)
+        statement = statement.where(func.date(CollectedData.fetch_time) == today)
+        if enabled_only:
+            statement = statement.where(Task.status == 1)
         return await self.session.scalar(statement) or 0
 
     async def average_quality_score(self) -> float:
