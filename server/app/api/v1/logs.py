@@ -13,6 +13,8 @@ async def list_logs(
     page_size: int = Query(default=20, ge=1, le=100),
     task_id: int | None = Query(default=None),
     level: str | None = Query(default=None),
+    message_contains: str | None = Query(default=None, max_length=500),
+    only_summary: bool = Query(default=False),
     service: DataService = Depends(get_data_service),
 ) -> ApiResponse[PageData[LogRead]]:
     data = await service.list_logs(
@@ -20,6 +22,8 @@ async def list_logs(
         page_size=page_size,
         task_id=task_id,
         level=level,
+        message_contains=message_contains,
+        only_summary=only_summary,
     )
     return ApiResponse(data=data)
 

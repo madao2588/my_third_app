@@ -11,4 +11,10 @@ abstract class NoticeRepository {
   Future<NoticeDetailModel> fetchNoticeDetail(int id);
 
   Future<NoticeSnapshotModel> fetchSnapshot(int id);
+
+  /// 导出采集库原始行（UTF-8 BOM CSV），[limit] 最大 10000。
+  Future<List<int>> downloadCollectedDataExport({
+    int limit = 5000,
+    int? taskId,
+  });
 }

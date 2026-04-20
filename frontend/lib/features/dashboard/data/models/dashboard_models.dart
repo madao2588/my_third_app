@@ -1,5 +1,36 @@
 import '../../../notices/data/models/notice_models.dart';
 
+class DashboardRuntimeModel {
+  final String status;
+  final String database;
+  final String scheduler;
+  final int scheduledJobs;
+
+  const DashboardRuntimeModel({
+    required this.status,
+    required this.database,
+    required this.scheduler,
+    required this.scheduledJobs,
+  });
+
+  factory DashboardRuntimeModel.fromJson(Map<String, dynamic>? json) {
+    if (json == null || json.isEmpty) {
+      return const DashboardRuntimeModel(
+        status: 'unknown',
+        database: 'unknown',
+        scheduler: 'unknown',
+        scheduledJobs: 0,
+      );
+    }
+    return DashboardRuntimeModel(
+      status: json['status']?.toString() ?? 'unknown',
+      database: json['database']?.toString() ?? 'unknown',
+      scheduler: json['scheduler']?.toString() ?? 'unknown',
+      scheduledJobs: json['scheduled_jobs'] as int? ?? 0,
+    );
+  }
+}
+
 class DashboardMetricsModel {
   final int todayNewNotices;
   final int keywordHitNotices;
@@ -62,6 +93,7 @@ class SourceDistributionItemModel {
 
 class DashboardOverviewModel {
   final DashboardMetricsModel metrics;
+  final DashboardRuntimeModel runtime;
   final List<NoticeListItemModel> highValueNotices;
   final List<NoticeListItemModel> recentNotices;
   final List<KeywordHeatItemModel> keywordHeat;
@@ -70,6 +102,7 @@ class DashboardOverviewModel {
 
   const DashboardOverviewModel({
     required this.metrics,
+    required this.runtime,
     required this.highValueNotices,
     required this.recentNotices,
     required this.keywordHeat,
@@ -81,6 +114,9 @@ class DashboardOverviewModel {
     return DashboardOverviewModel(
       metrics: DashboardMetricsModel.fromJson(
         json['metrics'] as Map<String, dynamic>? ?? {},
+      ),
+      runtime: DashboardRuntimeModel.fromJson(
+        json['runtime'] as Map<String, dynamic>?,
       ),
       highValueNotices: (json['high_value_notices'] as List<dynamic>? ?? [])
           .whereType<Map<String, dynamic>>()

@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../core/network/api_client.dart';
+import '../../core/widgets/async_error_panel.dart';
 import '../navigation/app_shell.dart';
 import '../../features/auth/presentation/pages/login_page.dart';
 
@@ -25,6 +26,12 @@ class _AppRouterState extends State<AppRouter> {
   bool _isAuthenticated = false;
   String _userName = '运营管理员';
   Uint8List? _avatarBytes;
+
+  void _retryBootstrap() {
+    setState(() {
+      _bootstrapFuture = _loadSession();
+    });
+  }
 
   @override
   void initState() {
@@ -177,7 +184,20 @@ class _AppRouterState extends State<AppRouter> {
 
         if (snapshot.hasError) {
           return Scaffold(
-            body: Center(child: Text("Error: ${snapshot.error}")),
+            body: Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 480),
+                child: Padding(
+                  padding: const EdgeInsets.all(24),
+                  child: AsyncErrorPanel(
+                    error: snapshot.error!,
+                    title: '启动应用失败',
+                    retryLabel: '重新加载',
+                    onRetry: _retryBootstrap,
+                  ),
+                ),
+              ),
+            ),
           );
         }
 

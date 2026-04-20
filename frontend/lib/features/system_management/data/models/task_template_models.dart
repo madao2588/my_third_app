@@ -77,12 +77,39 @@ class TestTemplateRequest {
   }
 }
 
+class TemplateTestTrace {
+  final String? fetch;
+  final String? contentSource;
+  final List<String> notes;
+
+  const TemplateTestTrace({
+    this.fetch,
+    this.contentSource,
+    this.notes = const [],
+  });
+
+  factory TemplateTestTrace.fromJson(Object? raw) {
+    if (raw == null || raw is! Map) {
+      return const TemplateTestTrace();
+    }
+    final m = Map<String, dynamic>.from(raw);
+    return TemplateTestTrace(
+      fetch: m['fetch']?.toString(),
+      contentSource: m['content_source']?.toString(),
+      notes: (m['notes'] as List<dynamic>? ?? [])
+          .map((e) => e.toString())
+          .toList(),
+    );
+  }
+}
+
 class TestTemplateResponse {
   final String? title;
   final String? contentText;
   final String? contentHtml;
   final int? qualityScore;
   final String? error;
+  final TemplateTestTrace? trace;
 
   const TestTemplateResponse({
     this.title,
@@ -90,6 +117,7 @@ class TestTemplateResponse {
     this.contentHtml,
     this.qualityScore,
     this.error,
+    this.trace,
   });
 
   factory TestTemplateResponse.fromJson(Map<String, dynamic> json) {
@@ -99,6 +127,9 @@ class TestTemplateResponse {
       contentHtml: json['content_html']?.toString(),
       qualityScore: json['quality_score'] as int?,
       error: json['error']?.toString(),
+      trace: json['trace'] != null
+          ? TemplateTestTrace.fromJson(json['trace'])
+          : null,
     );
   }
 }

@@ -1,3 +1,4 @@
+import json
 from typing import Any
 
 from fastapi import HTTPException, Request
@@ -34,11 +35,12 @@ async def validation_exception_handler(
         message=f"Validation error on {request.method} {request.url.path}",
         error_stack=str(exc.errors()),
     )
+    safe_errors: Any = json.loads(json.dumps(exc.errors(), default=str))
     return build_error_response(
         status_code=422,
         code=4000,
         message="validation error",
-        data=exc.errors(),
+        data=safe_errors,
     )
 
 

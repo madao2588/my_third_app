@@ -20,6 +20,7 @@ from app.core.exceptions import (
 )
 from app.core.lifecycle import lifespan
 from app.core.config import get_settings
+from app.core.runtime_status import get_runtime_snapshot
 from app.schemas.common import ApiResponse, HealthPayload
 
 settings = get_settings()
@@ -63,16 +64,18 @@ def create_app() -> FastAPI:
     return app
 
 
-import os
-
 app = create_app()
 
 @app.get("/health", response_model=ApiResponse[HealthPayload])
 async def root() -> ApiResponse[HealthPayload]:
+    snap = await get_runtime_snapshot()
     return ApiResponse(
         data=HealthPayload(
-            status="ok",
+            status=snap["status"],
             app_name=settings.app_name,
+            database=snap["database"],
+            scheduler=snap["scheduler"],
+            scheduled_jobs=snap["scheduled_jobs"],
         )
     )
 

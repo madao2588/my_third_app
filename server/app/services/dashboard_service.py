@@ -1,11 +1,13 @@
 from collections import Counter
 
+from app.core.runtime_status import get_runtime_snapshot
 from app.repositories.data_repo import DataRepository
 from app.repositories.keyword_rule_repo import KeywordRepository
 from app.repositories.task_repo import TaskRepository
 from app.schemas.dashboard import (
     DashboardMetrics,
     DashboardOverview,
+    DashboardRuntime,
     KeywordHeatItem,
     SourceDistributionItem,
 )
@@ -23,6 +25,14 @@ class DashboardService:
         self.notice_service = NoticeService(data_repo=data_repo, keyword_repo=keyword_repo)
 
     async def get_overview(self) -> DashboardOverview:
+        snap = await get_runtime_snapshot()
+        runtime = DashboardRuntime(
+            status=snap["status"],
+            database=snap["database"],
+            scheduler=snap["scheduler"],
+            scheduled_jobs=snap["scheduled_jobs"],
+        )
+
         recent_items, _ = await self.data_repo.list_paginated(
             page=1,
             page_size=20,
@@ -58,6 +68,7 @@ class DashboardService:
                 monitoring_site_count=max(len(enabled_tasks), len(source_distribution)),
                 high_priority_notices=high_priority_notices,
             ),
+            runtime=runtime,
             high_value_notices=high_value_notices,
             recent_notices=recent_notices,
             keyword_heat=keyword_heat,

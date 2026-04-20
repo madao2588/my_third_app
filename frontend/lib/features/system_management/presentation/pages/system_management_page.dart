@@ -4,10 +4,13 @@ import 'package:flutter/material.dart';
 
 import '../../../../core/network/api_client.dart';
 import '../../../../core/utils/date_formatter.dart';
+import '../../../../core/utils/user_facing_error.dart';
+import '../../../../core/widgets/async_error_panel.dart';
 import '../../../../shared/models/page_data.dart';
 import '../../data/models/task_models.dart';
 import '../../data/models/task_template_models.dart';
 import '../../data/repositories/http_task_repository.dart';
+import '../../data/repositories/task_repository.dart';
 import '../../data/repositories/http_template_repository.dart';
 
 class SystemManagementPage extends StatefulWidget {
@@ -31,9 +34,7 @@ class SystemManagementPage extends StatefulWidget {
 }
 
 class _SystemManagementPageState extends State<SystemManagementPage> {
-  static const _activeStatuses = {'queued', 'running'};
-
-  late final HttpTaskRepository _repository;
+  late final TaskRepository _repository;
   late Future<PageData<TaskListItemModel>> _tasksFuture;
   late Future<PageData<TaskLogItemModel>> _logsFuture;
   late Future<LogSummaryModel> _logSummaryFuture;
@@ -54,8 +55,9 @@ class _SystemManagementPageState extends State<SystemManagementPage> {
   String _searchQuery = '';
   String _enabledFilter = 'all';
   String _resultFilter = 'all';
+  String _taskSortBy = 'id';
+  String _taskSortDir = 'desc';
   String _logLevelFilter = 'all';
-  String _logSearchQuery = '';
 
   @override
   void initState() {
@@ -134,15 +136,33 @@ class _SystemManagementPageState extends State<SystemManagementPage> {
   }
 
   Future<PageData<TaskListItemModel>> _fetchTasks() {
-    return _repository.fetchTasks(page: _taskPage, pageSize: _taskPageSize);
+    return _repository.fetchTasks(
+      page: _taskPage,
+      pageSize: _taskPageSize,
+      search: _searchQuery.isEmpty ? null : _searchQuery,
+      enabled: _enabledFilter,
+      lastRun: _resultFilter,
+      sortBy: _taskSortBy,
+      sortDir: _taskSortDir,
+    );
+  }
+
+  bool _hasTaskFilters() {
+    return _searchQuery.isNotEmpty ||
+        _enabledFilter != 'all' ||
+        _resultFilter != 'all' ||
+        _taskSortBy != 'id' ||
+        _taskSortDir != 'desc';
   }
 
   Future<PageData<TaskLogItemModel>> _fetchLogs() {
+    final keyword = _logSearchController.text.trim();
     return _repository.fetchLogs(
       page: _logPage,
       pageSize: _logPageSize,
       taskId: _parseTaskIdFilter(),
       level: _logLevelFilter == 'all' ? null : _logLevelFilter,
+      messageContains: keyword.isEmpty ? null : keyword,
     );
   }
 
@@ -206,7 +226,7 @@ class _SystemManagementPageState extends State<SystemManagementPage> {
       await _refresh();
       _showMessage(task.isEnabled ? '任务已停用。' : '任务已启用。');
     } catch (error) {
-      _showMessage('更新任务失败：$error', isError: true);
+      _showMessage('更新任务失败：${userFacingError(error)}', isError: true);
     }
   }
 
@@ -220,7 +240,7 @@ class _SystemManagementPageState extends State<SystemManagementPage> {
       await _refresh();
       _showMessage('任务 ${result.taskId} 已进入队列，当前状态：${result.status}。');
     } catch (error) {
-      _showMessage('运行任务失败：$error', isError: true);
+      _showMessage('运行任务失败：${userFacingError(error)}', isError: true);
     }
   }
 
@@ -228,7 +248,7 @@ class _SystemManagementPageState extends State<SystemManagementPage> {
     _remainingPollTicks = 5;
     _listPollingTimer?.cancel();
     _listPollingTimer =
-        Timer.periodic(const Duration(seconds: 3), (timer) async {
+        Timer.periodic(const Duration(minutes: 5), (timer) async {
       if (!mounted) {
         timer.cancel();
         return;
@@ -237,9 +257,8 @@ class _SystemManagementPageState extends State<SystemManagementPage> {
       await _refresh();
       _remainingPollTicks -= 1;
 
-      final snapshot = await _tasksFuture;
-      final hasActiveTasks = snapshot.items
-          .any((task) => _activeStatuses.contains(task.lastRunStatus));
+      final hasActiveTasks =
+          await _repository.hasActiveOrQueuedTasksGlobally();
 
       if (_remainingPollTicks <= 0 || !hasActiveTasks) {
         timer.cancel();
@@ -289,7 +308,7 @@ class _SystemManagementPageState extends State<SystemManagementPage> {
       await _refresh();
       _showMessage('任务已删除。');
     } catch (error) {
-      _showMessage('删除任务失败：$error', isError: true);
+      _showMessage('删除任务失败：${userFacingError(error)}', isError: true);
     }
   }
 
@@ -301,7 +320,7 @@ class _SystemManagementPageState extends State<SystemManagementPage> {
       }
       await _openTaskDetails(task);
     } catch (error) {
-      _showMessage('打开任务详情失败：$error', isError: true);
+      _showMessage('打开任务详情失败：${userFacingError(error)}', isError: true);
     }
   }
 
@@ -313,7 +332,7 @@ class _SystemManagementPageState extends State<SystemManagementPage> {
       }
       await _openTaskEditor(task);
     } catch (error) {
-      _showMessage('打开任务编辑器失败：$error', isError: true);
+      _showMessage('打开任务编辑器失败：${userFacingError(error)}', isError: true);
     }
   }
 
@@ -326,7 +345,7 @@ class _SystemManagementPageState extends State<SystemManagementPage> {
       await _runTask(task);
       await _refreshLogs();
     } catch (error) {
-      _showMessage('重新运行任务失败：$error', isError: true);
+      _showMessage('重新运行任务失败：${userFacingError(error)}', isError: true);
     }
   }
 
@@ -494,28 +513,49 @@ class _SystemManagementPageState extends State<SystemManagementPage> {
               ],
               const SizedBox(height: 16),
               _TaskSummaryBar(
-                  tasks: _applyFilters(snapshot.data?.items ?? const [])),
+                pageTasks: snapshot.data?.items ?? const <TaskListItemModel>[],
+                filteredTotal: snapshot.data?.total ?? 0,
+              ),
               const SizedBox(height: 16),
               _TaskFilterBar(
                 searchController: _searchController,
                 enabledFilter: _enabledFilter,
                 resultFilter: _resultFilter,
+                sortBy: _taskSortBy,
+                sortDir: _taskSortDir,
                 onSearchChanged: (value) {
                   setState(() {
                     _taskPage = 1;
                     _searchQuery = value.trim().toLowerCase();
+                    _tasksFuture = _fetchTasks();
                   });
                 },
                 onEnabledFilterChanged: (value) {
                   setState(() {
                     _taskPage = 1;
                     _enabledFilter = value;
+                    _tasksFuture = _fetchTasks();
                   });
                 },
                 onResultFilterChanged: (value) {
                   setState(() {
                     _taskPage = 1;
                     _resultFilter = value;
+                    _tasksFuture = _fetchTasks();
+                  });
+                },
+                onSortByChanged: (value) {
+                  setState(() {
+                    _taskPage = 1;
+                    _taskSortBy = value;
+                    _tasksFuture = _fetchTasks();
+                  });
+                },
+                onSortDirChanged: (value) {
+                  setState(() {
+                    _taskPage = 1;
+                    _taskSortDir = value;
+                    _tasksFuture = _fetchTasks();
                   });
                 },
                 onClear: () {
@@ -525,6 +565,9 @@ class _SystemManagementPageState extends State<SystemManagementPage> {
                     _searchQuery = '';
                     _enabledFilter = 'all';
                     _resultFilter = 'all';
+                    _taskSortBy = 'id';
+                    _taskSortDir = 'desc';
+                    _tasksFuture = _fetchTasks();
                   });
                 },
               ),
@@ -576,7 +619,19 @@ class _SystemManagementPageState extends State<SystemManagementPage> {
     return FutureBuilder<PageData<TaskLogItemModel>>(
       future: _logsFuture,
       builder: (context, snapshot) {
-        final filteredLogs = _applyLogSearch(snapshot.data?.items ?? const []);
+        if (snapshot.hasError) {
+          return AsyncErrorPanel(
+            error: snapshot.error!,
+            title: '加载日志列表失败',
+            onRetry: () {
+              setState(() {
+                _logsFuture = _fetchLogs();
+                _logSummaryFuture = _repository.fetchLogSummary();
+              });
+            },
+          );
+        }
+        final filteredLogs = snapshot.data?.items ?? const <TaskLogItemModel>[];
         return FutureBuilder<LogSummaryModel>(
           future: _logSummaryFuture,
           builder: (context, summarySnapshot) {
@@ -646,12 +701,7 @@ class _SystemManagementPageState extends State<SystemManagementPage> {
                       });
                       _refreshLogs();
                     },
-                    onSearchChanged: (value) {
-                      setState(() {
-                        _logSearchQuery = value.trim().toLowerCase();
-                      });
-                    },
-                    onApplyTaskId: () {
+                    onApplyFilters: () {
                       setState(() {
                         _logPage = 1;
                       });
@@ -663,7 +713,6 @@ class _SystemManagementPageState extends State<SystemManagementPage> {
                       setState(() {
                         _logPage = 1;
                         _logLevelFilter = 'all';
-                        _logSearchQuery = '';
                         _logsFuture = _fetchLogs();
                         _logSummaryFuture = _repository.fetchLogSummary();
                       });
@@ -734,17 +783,22 @@ class _SystemManagementPageState extends State<SystemManagementPage> {
     }
 
     if (snapshot.hasError) {
-      return Card(
-        child: Padding(
-          padding: const EdgeInsets.all(20),
-          child: Text('加载任务失败：${snapshot.error}'),
-        ),
+      return AsyncErrorPanel(
+        error: snapshot.error!,
+        title: '加载任务列表失败',
+        onRetry: () {
+          setState(() {
+            _tasksFuture = _fetchTasks();
+          });
+        },
       );
     }
 
-    final tasks =
-        _applyFilters(snapshot.data?.items ?? const <TaskListItemModel>[]);
-    if (tasks.isEmpty) {
+    final data = snapshot.data;
+    final pageTasks = data?.items ?? const <TaskListItemModel>[];
+    final total = data?.total ?? 0;
+    if (total == 0) {
+      final filtered = _hasTaskFilters();
       return Card(
         child: Padding(
           padding: const EdgeInsets.all(24),
@@ -753,17 +807,39 @@ class _SystemManagementPageState extends State<SystemManagementPage> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                '暂无任务',
+                filtered ? '无符合条件的任务' : '暂无任务',
                 style: Theme.of(context).textTheme.titleLarge,
               ),
               const SizedBox(height: 8),
-              const Text('先创建一个包含起始地址和定时表达式的采集任务。'),
-              const SizedBox(height: 16),
-              FilledButton.icon(
-                onPressed: () => _openTaskEditor(),
-                icon: const Icon(Icons.add),
-                label: const Text('创建第一个任务'),
+              Text(
+                filtered
+                    ? '调整搜索关键词或筛选条件，或清空筛选后查看全部任务。'
+                    : '先创建一个包含起始地址和定时表达式的采集任务。',
               ),
+              const SizedBox(height: 16),
+              if (filtered)
+                OutlinedButton.icon(
+                  onPressed: () {
+                    _searchController.clear();
+                    setState(() {
+                      _taskPage = 1;
+                      _searchQuery = '';
+                      _enabledFilter = 'all';
+                      _resultFilter = 'all';
+                      _taskSortBy = 'id';
+                      _taskSortDir = 'desc';
+                      _tasksFuture = _fetchTasks();
+                    });
+                  },
+                  icon: const Icon(Icons.filter_alt_off),
+                  label: const Text('清空筛选'),
+                )
+              else
+                FilledButton.icon(
+                  onPressed: () => _openTaskEditor(),
+                  icon: const Icon(Icons.add),
+                  label: const Text('创建第一个任务'),
+                ),
             ],
           ),
         ),
@@ -802,7 +878,7 @@ class _SystemManagementPageState extends State<SystemManagementPage> {
                       DataColumn(label: Text('创建时间')),
                       DataColumn(label: Text('操作')),
                     ],
-                    rows: tasks.map(_buildTaskRow).toList(),
+                    rows: pageTasks.map(_buildTaskRow).toList(),
                   ),
                 ),
               ),
@@ -932,44 +1008,6 @@ class _SystemManagementPageState extends State<SystemManagementPage> {
     );
   }
 
-  List<TaskListItemModel> _applyFilters(List<TaskListItemModel> tasks) {
-    return tasks.where((task) {
-      final matchesSearch = _searchQuery.isEmpty ||
-          task.name.toLowerCase().contains(_searchQuery) ||
-          task.startUrl.toLowerCase().contains(_searchQuery) ||
-          task.cronExpr.toLowerCase().contains(_searchQuery);
-
-      final matchesEnabled = switch (_enabledFilter) {
-        'enabled' => task.isEnabled,
-        'disabled' => !task.isEnabled,
-        _ => true,
-      };
-
-      final normalizedResult = task.lastRunStatus ?? 'never';
-      final matchesResult = switch (_resultFilter) {
-        'success' => normalizedResult == 'success',
-        'failed' => normalizedResult == 'failed',
-        'active' => _activeStatuses.contains(normalizedResult),
-        'never' => normalizedResult == 'never',
-        _ => true,
-      };
-
-      return matchesSearch && matchesEnabled && matchesResult;
-    }).toList();
-  }
-
-  List<TaskLogItemModel> _applyLogSearch(List<TaskLogItemModel> logs) {
-    if (_logSearchQuery.isEmpty) {
-      return logs;
-    }
-    return logs.where((log) {
-      return log.message.toLowerCase().contains(_logSearchQuery) ||
-          (log.errorStack?.toLowerCase().contains(_logSearchQuery) ?? false) ||
-          log.level.toLowerCase().contains(_logSearchQuery) ||
-          log.createdAt.toLowerCase().contains(_logSearchQuery);
-    }).toList();
-  }
-
   Widget _buildLogsBody(
     AsyncSnapshot<PageData<TaskLogItemModel>> snapshot,
     List<TaskLogItemModel> logs,
@@ -992,11 +1030,15 @@ class _SystemManagementPageState extends State<SystemManagementPage> {
     }
 
     if (snapshot.hasError) {
-      return Card(
-        child: Padding(
-          padding: const EdgeInsets.all(20),
-          child: Text('加载日志失败：${snapshot.error}'),
-        ),
+      return AsyncErrorPanel(
+        error: snapshot.error!,
+        title: '加载日志失败',
+        onRetry: () {
+          setState(() {
+            _logsFuture = _fetchLogs();
+            _logSummaryFuture = _repository.fetchLogSummary();
+          });
+        },
       );
     }
 
@@ -1005,7 +1047,9 @@ class _SystemManagementPageState extends State<SystemManagementPage> {
         child: Padding(
           padding: const EdgeInsets.all(24),
           child: Text(
-            _logSearchQuery.isEmpty ? '当前筛选条件下没有日志。' : '当前搜索条件下没有日志。',
+            _logSearchController.text.trim().isEmpty
+                ? '当前筛选条件下没有日志。'
+                : '当前搜索条件下没有日志。',
           ),
         ),
       );
@@ -1030,9 +1074,9 @@ class _SystemManagementPageState extends State<SystemManagementPage> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(
-                          log.message,
-                          style: Theme.of(context).textTheme.titleSmall,
+                        _LogMessageWithRunHighlight(
+                          message: log.message,
+                          baseStyle: Theme.of(context).textTheme.titleSmall,
                         ),
                         const SizedBox(height: 6),
                         Wrap(
@@ -1231,13 +1275,52 @@ class _SystemHeroChip extends StatelessWidget {
   }
 }
 
+class _LogMessageWithRunHighlight extends StatelessWidget {
+  final String message;
+  final TextStyle? baseStyle;
+
+  const _LogMessageWithRunHighlight({
+    required this.message,
+    this.baseStyle,
+  });
+
+  static final _runPattern = RegExp(r'(\[run=[a-fA-F0-9]+\])');
+
+  @override
+  Widget build(BuildContext context) {
+    final style = baseStyle ?? Theme.of(context).textTheme.titleSmall;
+    if (!_runPattern.hasMatch(message)) {
+      return Text(message, style: style);
+    }
+    final spans = <InlineSpan>[];
+    var start = 0;
+    for (final m in _runPattern.allMatches(message)) {
+      if (m.start > start) {
+        spans.add(TextSpan(text: message.substring(start, m.start)));
+      }
+      spans.add(TextSpan(
+        text: m.group(0),
+        style: style?.copyWith(
+          fontWeight: FontWeight.w600,
+          color: const Color(0xFF5B2C83),
+          backgroundColor: const Color(0xFFF3E5F5),
+        ),
+      ));
+      start = m.end;
+    }
+    if (start < message.length) {
+      spans.add(TextSpan(text: message.substring(start)));
+    }
+    return Text.rich(TextSpan(style: style, children: spans));
+  }
+}
+
 class _LogFilterBar extends StatelessWidget {
   final TextEditingController taskIdController;
   final TextEditingController searchController;
   final String levelFilter;
   final ValueChanged<String> onLevelChanged;
-  final ValueChanged<String> onSearchChanged;
-  final Future<void> Function() onApplyTaskId;
+  final Future<void> Function() onApplyFilters;
   final VoidCallback onClear;
 
   const _LogFilterBar({
@@ -1245,8 +1328,7 @@ class _LogFilterBar extends StatelessWidget {
     required this.searchController,
     required this.levelFilter,
     required this.onLevelChanged,
-    required this.onSearchChanged,
-    required this.onApplyTaskId,
+    required this.onApplyFilters,
     required this.onClear,
   });
 
@@ -1269,7 +1351,7 @@ class _LogFilterBar extends StatelessWidget {
                   labelText: '任务 ID',
                   hintText: '可选',
                 ),
-                onSubmitted: (_) => onApplyTaskId(),
+                onSubmitted: (_) => onApplyFilters(),
               ),
             ),
             SizedBox(
@@ -1292,16 +1374,16 @@ class _LogFilterBar extends StatelessWidget {
               width: 320,
               child: TextField(
                 controller: searchController,
-                onChanged: onSearchChanged,
+                onSubmitted: (_) => onApplyFilters(),
                 decoration: const InputDecoration(
                   labelText: '搜索日志',
-                  hintText: '消息、错误堆栈、级别、时间',
+                  hintText: '消息 / 错误堆栈 / run_id，回车或点应用查后端',
                   prefixIcon: Icon(Icons.search),
                 ),
               ),
             ),
             FilledButton.tonal(
-              onPressed: onApplyTaskId,
+              onPressed: onApplyFilters,
               child: const Text('应用'),
             ),
             OutlinedButton.icon(
@@ -1342,18 +1424,26 @@ class _TaskFilterBar extends StatelessWidget {
   final TextEditingController searchController;
   final String enabledFilter;
   final String resultFilter;
+  final String sortBy;
+  final String sortDir;
   final ValueChanged<String> onSearchChanged;
   final ValueChanged<String> onEnabledFilterChanged;
   final ValueChanged<String> onResultFilterChanged;
+  final ValueChanged<String> onSortByChanged;
+  final ValueChanged<String> onSortDirChanged;
   final VoidCallback onClear;
 
   const _TaskFilterBar({
     required this.searchController,
     required this.enabledFilter,
     required this.resultFilter,
+    required this.sortBy,
+    required this.sortDir,
     required this.onSearchChanged,
     required this.onEnabledFilterChanged,
     required this.onResultFilterChanged,
+    required this.onSortByChanged,
+    required this.onSortDirChanged,
     required this.onClear,
   });
 
@@ -1411,6 +1501,42 @@ class _TaskFilterBar extends StatelessWidget {
                 onChanged: (value) => onResultFilterChanged(value ?? 'all'),
               ),
             ),
+            SizedBox(
+              width: 160,
+              child: DropdownButtonFormField<String>(
+                initialValue: sortBy,
+                decoration: const InputDecoration(
+                  labelText: '排序',
+                ),
+                items: const [
+                  DropdownMenuItem(value: 'id', child: Text('按 ID')),
+                  DropdownMenuItem(value: 'name', child: Text('按名称')),
+                  DropdownMenuItem(
+                    value: 'last_run_at',
+                    child: Text('按最近运行'),
+                  ),
+                  DropdownMenuItem(
+                    value: 'created_at',
+                    child: Text('按创建时间'),
+                  ),
+                ],
+                onChanged: (value) => onSortByChanged(value ?? 'id'),
+              ),
+            ),
+            SizedBox(
+              width: 120,
+              child: DropdownButtonFormField<String>(
+                initialValue: sortDir,
+                decoration: const InputDecoration(
+                  labelText: '顺序',
+                ),
+                items: const [
+                  DropdownMenuItem(value: 'asc', child: Text('升序')),
+                  DropdownMenuItem(value: 'desc', child: Text('降序')),
+                ],
+                onChanged: (value) => onSortDirChanged(value ?? 'desc'),
+              ),
+            ),
             OutlinedButton.icon(
               onPressed: onClear,
               icon: const Icon(Icons.clear),
@@ -1424,48 +1550,50 @@ class _TaskFilterBar extends StatelessWidget {
 }
 
 class _TaskSummaryBar extends StatelessWidget {
-  final List<TaskListItemModel> tasks;
+  final List<TaskListItemModel> pageTasks;
+  final int filteredTotal;
 
   const _TaskSummaryBar({
-    required this.tasks,
+    required this.pageTasks,
+    required this.filteredTotal,
   });
 
   @override
   Widget build(BuildContext context) {
-    final enabledCount = tasks.where((task) => task.isEnabled).length;
-    final activeCount = tasks
+    final enabledCount = pageTasks.where((task) => task.isEnabled).length;
+    final activeCount = pageTasks
         .where(
           (task) =>
               task.lastRunStatus == 'queued' || task.lastRunStatus == 'running',
         )
         .length;
     final failedCount =
-        tasks.where((task) => task.lastRunStatus == 'failed').length;
+        pageTasks.where((task) => task.lastRunStatus == 'failed').length;
 
     return Wrap(
       spacing: 16,
       runSpacing: 16,
       children: [
         _TaskMetricCard(
-          title: '任务总数',
-          value: '${tasks.length}',
+          title: '符合条件的任务',
+          value: '$filteredTotal',
           icon: Icons.assignment_outlined,
           accentColor: const Color(0xFF1E4F8A),
         ),
         _TaskMetricCard(
-          title: '已启用',
+          title: '本页已启用',
           value: '$enabledCount',
           icon: Icons.toggle_on_outlined,
           accentColor: const Color(0xFF117A65),
         ),
         _TaskMetricCard(
-          title: '排队中 / 运行中',
+          title: '本页排队 / 运行',
           value: '$activeCount',
           icon: Icons.timelapse_outlined,
           accentColor: const Color(0xFF2D6CDF),
         ),
         _TaskMetricCard(
-          title: '最近失败',
+          title: '本页最近失败',
           value: '$failedCount',
           icon: Icons.error_outline,
           accentColor: const Color(0xFFC45A1A),
@@ -1573,6 +1701,7 @@ class _TaskResultCell extends StatelessWidget {
   Widget build(BuildContext context) {
     final status = task.lastRunStatus ?? 'never';
     final detail = task.lastErrorMessage;
+    final slowRunning = _isLongRunningRunningTask(task);
     final color = switch (status) {
       'success' => const Color(0xFFE3F6E8),
       'failed' => const Color(0xFFFCE8E6),
@@ -1584,11 +1713,44 @@ class _TaskResultCell extends StatelessWidget {
       message: detail == null || detail.isEmpty
           ? _statusLabel(status)
           : '${_statusLabel(status)}\n$detail',
-      child: Chip(
-        label: Text(_statusLabel(status)),
-        backgroundColor: color,
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Chip(
+            label: Text(_statusLabel(status)),
+            backgroundColor: color,
+          ),
+          if (slowRunning) ...[
+            const SizedBox(width: 6),
+            const Tooltip(
+              message: '任务已运行超过 5 分钟，详情页将使用降频轮询。',
+              child: Icon(
+                Icons.hourglass_bottom,
+                size: 16,
+                color: Color(0xFF8A4B00),
+              ),
+            ),
+          ],
+        ],
       ),
     );
+  }
+}
+
+bool _isLongRunningRunningTask(TaskListItemModel task) {
+  if ((task.lastRunStatus ?? '') != 'running') {
+    return false;
+  }
+  final raw = task.lastRunAt;
+  if (raw == null || raw.trim().isEmpty) {
+    return false;
+  }
+  try {
+    final started = DateTime.parse(raw).toUtc();
+    return DateTime.now().toUtc().difference(started) >=
+        const Duration(minutes: 5);
+  } catch (_) {
+    return false;
   }
 }
 
@@ -1609,7 +1771,7 @@ String _displayValue(String? value) {
 
 class _TaskEditorDialog extends StatefulWidget {
   final TaskListItemModel? task;
-  final HttpTaskRepository repository;
+  final TaskRepository repository;
   final TaskTemplateModel? initialTemplate;
   final List<TaskTemplateModel> templates;
 
@@ -1688,7 +1850,7 @@ class _TaskEditorDialogState extends State<_TaskEditorDialog> {
       Navigator.of(context).pop(true);
     } catch (error) {
       setState(() {
-        _submitError = '$error';
+        _submitError = userFacingError(error);
       });
     } finally {
       if (mounted) {
@@ -1814,6 +1976,14 @@ class _TaskEditorDialogState extends State<_TaskEditorDialog> {
                   maxLines: 5,
                   decoration: const InputDecoration(
                     labelText: '解析规则 JSON（可选）',
+                    helperText:
+                        'list_follow：list_item、detail_link、max_items；分页：'
+                        'list_url_template、list_page_urls、list_next_page、'
+                        'max_list_pages、list_delay_ms；详情：detail_delay_ms、'
+                        'detail_retries、detail_retry_backoff_ms、'
+                        'detail_retry_policy（all 或 transient）；请求：'
+                        'request_timeout_sec、user_agent、http_headers；'
+                        '登录态：http_cookies、cookie_domain（敏感，勿泄露）。',
                   ),
                 ),
                 const SizedBox(height: 12),
@@ -1856,7 +2026,7 @@ class _TaskEditorDialogState extends State<_TaskEditorDialog> {
 
 class _TaskDetailsDialog extends StatefulWidget {
   final TaskListItemModel task;
-  final HttpTaskRepository repository;
+  final TaskRepository repository;
 
   const _TaskDetailsDialog({
     required this.task,
@@ -1869,44 +2039,75 @@ class _TaskDetailsDialog extends StatefulWidget {
 
 class _TaskDetailsDialogState extends State<_TaskDetailsDialog> {
   static const _pollingStatuses = {'queued', 'running'};
+  static const _fastPollingInterval = Duration(minutes: 5);
+  static const _slowPollingInterval = Duration(minutes: 5);
+  static const _slowPollingThreshold = Duration(minutes: 5);
 
   late Future<TaskListItemModel> _taskFuture;
+  late Future<TaskLogItemModel?> _summaryLogFuture;
   late Future<PageData<TaskLogItemModel>> _logsFuture;
   Timer? _pollingTimer;
+  Timer? _highlightClearTimer;
+  int? _highlightLogId;
+  String? _lastObservedRunStatus;
+  DateTime? _pollingStartedAt;
+  Duration _currentPollingInterval = _fastPollingInterval;
 
   @override
   void initState() {
     super.initState();
     _taskFuture = widget.repository.fetchTask(widget.task.id);
+    _summaryLogFuture = _fetchLatestSummaryLog();
     _logsFuture = widget.repository.fetchTaskLogs(widget.task.id);
+    _lastObservedRunStatus = widget.task.lastRunStatus;
     _maybeStartPolling(widget.task.lastRunStatus);
   }
 
   @override
   void dispose() {
     _pollingTimer?.cancel();
+    _highlightClearTimer?.cancel();
     super.dispose();
   }
 
-  Future<void> _refreshDetails() async {
+  Future<void> _refreshDetails({bool refreshLogs = true}) async {
     if (!mounted) {
       return;
     }
 
     final taskFuture = widget.repository.fetchTask(widget.task.id);
-    final logsFuture = widget.repository.fetchTaskLogs(widget.task.id);
+    final summaryFuture = _fetchLatestSummaryLog();
+    final logsFuture =
+        refreshLogs ? widget.repository.fetchTaskLogs(widget.task.id) : null;
 
     setState(() {
       _taskFuture = taskFuture;
-      _logsFuture = logsFuture;
+      _summaryLogFuture = summaryFuture;
+      if (logsFuture != null) {
+        _logsFuture = logsFuture;
+      }
     });
 
     try {
       final task = await taskFuture;
+      final statusChanged = task.lastRunStatus != _lastObservedRunStatus;
+      _lastObservedRunStatus = task.lastRunStatus;
       _maybeStartPolling(task.lastRunStatus);
+      if (!refreshLogs && statusChanged && mounted) {
+        final forcedLogsFuture = widget.repository.fetchTaskLogs(widget.task.id);
+        setState(() {
+          _logsFuture = forcedLogsFuture;
+        });
+      }
       if (!_shouldPoll(task.lastRunStatus)) {
         _pollingTimer?.cancel();
         _pollingTimer = null;
+        if (!refreshLogs && mounted) {
+          final finalLogsFuture = widget.repository.fetchTaskLogs(widget.task.id);
+          setState(() {
+            _logsFuture = finalLogsFuture;
+          });
+        }
       }
     } catch (_) {
       _pollingTimer?.cancel();
@@ -1918,19 +2119,113 @@ class _TaskDetailsDialogState extends State<_TaskDetailsDialog> {
     if (!_shouldPoll(status)) {
       _pollingTimer?.cancel();
       _pollingTimer = null;
+      _pollingStartedAt = null;
+      _currentPollingInterval = _fastPollingInterval;
       return;
     }
 
-    _pollingTimer ??= Timer.periodic(
-      const Duration(seconds: 3),
-      (_) => _refreshDetails(),
-    );
+    _pollingStartedAt ??= DateTime.now();
+    _currentPollingInterval = _resolvePollingInterval();
+    if (_pollingTimer == null || !_pollingTimer!.isActive) {
+      _scheduleNextPollingTick();
+    }
   }
 
   bool _shouldPoll(String? status) => _pollingStatuses.contains(status);
 
+  Duration _resolvePollingInterval() {
+    final startedAt = _pollingStartedAt;
+    if (startedAt == null) {
+      return _fastPollingInterval;
+    }
+    final runningFor = DateTime.now().difference(startedAt);
+    if (runningFor >= _slowPollingThreshold) {
+      return _slowPollingInterval;
+    }
+    return _fastPollingInterval;
+  }
+
+  void _scheduleNextPollingTick() {
+    _pollingTimer?.cancel();
+    _pollingTimer = Timer(_currentPollingInterval, () async {
+      _pollingTimer = null;
+      await _refreshDetails(refreshLogs: false);
+    });
+  }
+
+  bool get _isSlowPolling => _currentPollingInterval == _slowPollingInterval;
+
+  Future<TaskLogItemModel?> _fetchLatestSummaryLog() async {
+    final page = await widget.repository.fetchTaskLogs(
+      widget.task.id,
+      page: 1,
+      pageSize: 1,
+      onlySummary: true,
+    );
+    if (page.items.isEmpty) {
+      return null;
+    }
+    return page.items.first;
+  }
+
+  List<MapEntry<String, String>> _extractSummaryMetrics(TaskLogItemModel log) {
+    final structured = log.runSummary;
+    if (structured == null) {
+      return const <MapEntry<String, String>>[];
+    }
+    final metricsRaw = structured['metrics'];
+    if (metricsRaw is! Map<String, dynamic>) {
+      return const <MapEntry<String, String>>[];
+    }
+    return metricsRaw.entries
+        .map((entry) => MapEntry(entry.key, entry.value.toString()))
+        .toList();
+  }
+
+  String _summaryLabel(String key) {
+    return switch (key) {
+      'list_pages' => '列表页',
+      'detail_discovered' => '发现详情',
+      'detail_processed' => '处理详情',
+      'stored' => '入库',
+      'skipped_hash' => '重复跳过',
+      'failed' => '失败',
+      'detail_limit' => '详情上限',
+      'detail_limit_hit' => '命中上限',
+      'remaining_list_queue' => '待扫列表',
+      'processed' => '处理数',
+      _ => key,
+    };
+  }
+
+  _SummaryMetricTone _summaryTone(MapEntry<String, String> metric) {
+    final key = metric.key;
+    final value = metric.value.trim().toLowerCase();
+
+    if (key == 'failed') {
+      final n = int.tryParse(value) ?? 0;
+      if (n > 0) {
+        return _SummaryMetricTone.danger;
+      }
+    }
+
+    if (key == 'detail_limit_hit' &&
+        (value == 'true' || value == '1' || value == 'yes')) {
+      return _SummaryMetricTone.danger;
+    }
+
+    if (key == 'skipped_hash') {
+      final n = int.tryParse(value) ?? 0;
+      if (n > 0) {
+        return _SummaryMetricTone.warning;
+      }
+    }
+
+    return _SummaryMetricTone.neutral;
+  }
+
   Future<void> _refreshManually() async {
-    await _refreshDetails();
+    await _refreshDetails(refreshLogs: true);
   }
 
   @override
@@ -1973,7 +2268,18 @@ class _TaskDetailsDialogState extends State<_TaskDetailsDialog> {
             if (taskSnapshot.hasError && taskSnapshot.data == null) {
               return _DetailBlock(
                 title: '任务加载失败',
-                child: Text('加载任务详情失败：${taskSnapshot.error}'),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    SelectableText(userFacingError(taskSnapshot.error)),
+                    const SizedBox(height: 12),
+                    FilledButton.tonalIcon(
+                      onPressed: _refreshManually,
+                      icon: const Icon(Icons.refresh),
+                      label: const Text('重试'),
+                    ),
+                  ],
+                ),
               );
             }
 
@@ -1994,7 +2300,41 @@ class _TaskDetailsDialogState extends State<_TaskDetailsDialog> {
                       borderRadius: BorderRadius.circular(12),
                     ),
                     child: const Text(
-                      '该任务正在执行中，详情与日志会每 3 秒自动刷新一次。',
+                      '该任务正在执行中，详情与日志会自动刷新。',
+                    ),
+                  ),
+                if (isPolling)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      children: [
+                        Text(
+                          '当前轮询间隔：${_currentPollingInterval.inSeconds} 秒',
+                          style: Theme.of(context).textTheme.bodySmall,
+                        ),
+                        if (_isSlowPolling)
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 8,
+                              vertical: 4,
+                            ),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFFFF4E5),
+                              borderRadius: BorderRadius.circular(999),
+                            ),
+                            child: const Text(
+                              '长时运行，已降频轮询',
+                              style: TextStyle(
+                                color: Color(0xFF8A4B00),
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                      ],
                     ),
                   ),
                 Wrap(
@@ -2063,7 +2403,18 @@ class _TaskDetailsDialogState extends State<_TaskDetailsDialog> {
                       if (snapshot.hasError) {
                         return _DetailBlock(
                           title: '日志加载失败',
-                          child: Text('加载日志失败：${snapshot.error}'),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              SelectableText(userFacingError(snapshot.error)),
+                              const SizedBox(height: 12),
+                              FilledButton.tonalIcon(
+                                onPressed: _refreshDetails,
+                                icon: const Icon(Icons.refresh),
+                                label: const Text('重试'),
+                              ),
+                            ],
+                          ),
                         );
                       }
 
@@ -2076,32 +2427,173 @@ class _TaskDetailsDialogState extends State<_TaskDetailsDialog> {
                         );
                       }
 
-                      return ListView.separated(
-                        shrinkWrap: true,
-                        itemCount: logs.length,
-                        separatorBuilder: (_, __) => const Divider(height: 1),
-                        itemBuilder: (context, index) {
-                          final log = logs[index];
-                          return ListTile(
-                            contentPadding: EdgeInsets.zero,
-                            leading: _LogLevelBadge(level: log.level),
-                            title: Text(log.message),
-                            subtitle: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                const SizedBox(height: 4),
-                                Text(_displayValue(log.createdAt)),
-                                if (log.errorStack != null &&
-                                    log.errorStack!.isNotEmpty) ...[
-                                  const SizedBox(height: 8),
-                                  SelectableText(
-                                    log.errorStack!,
-                                    style:
-                                        Theme.of(context).textTheme.bodySmall,
+                      final firstErrorIndex = logs.indexWhere(
+                        (log) => log.level.toUpperCase() == 'ERROR',
+                      );
+                      final firstErrorKey = GlobalKey();
+                      return FutureBuilder<TaskLogItemModel?>(
+                        future: _summaryLogFuture,
+                        builder: (context, summarySnapshot) {
+                          final latestSummary = summarySnapshot.data;
+                          final summaryMetrics = latestSummary == null
+                              ? const <MapEntry<String, String>>[]
+                              : _extractSummaryMetrics(latestSummary);
+                          final hasDangerSummaryMetric = summaryMetrics.any(
+                            (metric) =>
+                                _summaryTone(metric) == _SummaryMetricTone.danger,
+                          );
+                          return Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              if (latestSummary != null) ...[
+                                _DetailBlock(
+                                  title: '运行摘要',
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      if (hasDangerSummaryMetric) ...[
+                                        Container(
+                                          margin: const EdgeInsets.only(bottom: 8),
+                                          decoration: BoxDecoration(
+                                            color: const Color(0xFFFCE8E6),
+                                            borderRadius:
+                                                BorderRadius.circular(999),
+                                          ),
+                                          child: InkWell(
+                                            borderRadius:
+                                                BorderRadius.circular(999),
+                                            onTap: firstErrorIndex < 0
+                                                ? null
+                                                : () {
+                                                    final errorLog =
+                                                        logs[firstErrorIndex];
+                                                    WidgetsBinding.instance
+                                                        .addPostFrameCallback((_) {
+                                                      final ctx =
+                                                          firstErrorKey.currentContext;
+                                                      if (ctx != null) {
+                                                        Scrollable.ensureVisible(
+                                                          ctx,
+                                                          duration:
+                                                              const Duration(
+                                                            milliseconds: 260,
+                                                          ),
+                                                          curve: Curves.easeOut,
+                                                          alignment: 0.2,
+                                                        );
+                                                      }
+                                                    });
+                                                    if (!mounted) {
+                                                      return;
+                                                    }
+                                                    setState(() {
+                                                      _highlightLogId =
+                                                          errorLog.id;
+                                                    });
+                                                    _highlightClearTimer
+                                                        ?.cancel();
+                                                    _highlightClearTimer =
+                                                        Timer(
+                                                      const Duration(seconds: 2),
+                                                      () {
+                                                        if (!mounted) {
+                                                          return;
+                                                        }
+                                                        setState(() {
+                                                          _highlightLogId = null;
+                                                        });
+                                                      },
+                                                    );
+                                                  },
+                                            child: Padding(
+                                              padding:
+                                                  const EdgeInsets.symmetric(
+                                                horizontal: 10,
+                                                vertical: 6,
+                                              ),
+                                              child: Text(
+                                                firstErrorIndex < 0
+                                                    ? '本次有异常'
+                                                    : '本次有异常（点击定位错误日志）',
+                                                style: const TextStyle(
+                                                  color: Color(0xFFB3261E),
+                                                  fontWeight: FontWeight.w600,
+                                                ),
+                                              ),
+                                            ),
+                                          ),
+                                        ),
+                                      ],
+                                      if (summaryMetrics.isNotEmpty) ...[
+                                        Wrap(
+                                          spacing: 8,
+                                          runSpacing: 8,
+                                          children: summaryMetrics.map((entry) {
+                                            return _SummaryMetricChip(
+                                              label: _summaryLabel(entry.key),
+                                              value: entry.value,
+                                              tone: _summaryTone(entry),
+                                            );
+                                          }).toList(),
+                                        ),
+                                        const SizedBox(height: 8),
+                                      ],
+                                      SelectableText(latestSummary.message),
+                                      const SizedBox(height: 6),
+                                      Text(
+                                        '时间：${_displayValue(latestSummary.createdAt)}',
+                                        style: Theme.of(context)
+                                            .textTheme
+                                            .bodySmall,
+                                      ),
+                                    ],
                                   ),
-                                ],
+                                ),
+                                const SizedBox(height: 8),
                               ],
-                            ),
+                              Expanded(
+                                child: ListView.separated(
+                              shrinkWrap: true,
+                              itemCount: logs.length,
+                              separatorBuilder: (_, __) =>
+                                  const Divider(height: 1),
+                              itemBuilder: (context, index) {
+                                final log = logs[index];
+                                final highlighted = _highlightLogId == log.id;
+                                return ListTile(
+                                  key:
+                                      index == firstErrorIndex
+                                          ? firstErrorKey
+                                          : null,
+                                  contentPadding: EdgeInsets.zero,
+                                  tileColor: highlighted
+                                      ? const Color(0xFFFCE8E6)
+                                      : null,
+                                  leading: _LogLevelBadge(level: log.level),
+                                  title: Text(log.message),
+                                  subtitle: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      const SizedBox(height: 4),
+                                      Text(_displayValue(log.createdAt)),
+                                      if (log.errorStack != null &&
+                                          log.errorStack!.isNotEmpty) ...[
+                                        const SizedBox(height: 8),
+                                        SelectableText(
+                                          log.errorStack!,
+                                          style: Theme.of(context)
+                                              .textTheme
+                                              .bodySmall,
+                                        ),
+                                      ],
+                                    ],
+                                  ),
+                                );
+                              },
+                                ),
+                              ),
+                            ],
                           );
                         },
                       );
@@ -2201,7 +2693,7 @@ class _SaveTaskAsTemplateDialogState extends State<_SaveTaskAsTemplateDialog> {
       Navigator.of(context).pop(true);
     } catch (error) {
       setState(() {
-        _submitError = '$error';
+        _submitError = userFacingError(error);
       });
     } finally {
       if (mounted) {
@@ -2308,6 +2800,57 @@ class _DetailChip extends StatelessWidget {
           ),
           const SizedBox(height: 4),
           SelectableText(value),
+        ],
+      ),
+    );
+  }
+}
+
+enum _SummaryMetricTone { neutral, warning, danger }
+
+class _SummaryMetricChip extends StatelessWidget {
+  final String label;
+  final String value;
+  final _SummaryMetricTone tone;
+
+  const _SummaryMetricChip({
+    required this.label,
+    required this.value,
+    required this.tone,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final background = switch (tone) {
+      _SummaryMetricTone.danger => const Color(0xFFFCE8E6),
+      _SummaryMetricTone.warning => const Color(0xFFFFF4E5),
+      _SummaryMetricTone.neutral => const Color(0xFFF3F6FA),
+    };
+    final valueColor = switch (tone) {
+      _SummaryMetricTone.danger => const Color(0xFFB3261E),
+      _SummaryMetricTone.warning => const Color(0xFF8A4B00),
+      _SummaryMetricTone.neutral => null,
+    };
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: background,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            label,
+            style: Theme.of(context).textTheme.labelMedium,
+          ),
+          const SizedBox(height: 4),
+          SelectableText(
+            value,
+            style: valueColor == null ? null : TextStyle(color: valueColor),
+          ),
         ],
       ),
     );

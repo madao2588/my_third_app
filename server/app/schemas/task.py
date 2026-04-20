@@ -1,7 +1,9 @@
-from enum import IntEnum
 from datetime import datetime
+from enum import IntEnum
 
 from pydantic import BaseModel, Field, field_validator
+
+from app.schemas.parser_rules import validate_parser_rules_str
 
 
 class TaskStatus(IntEnum):
@@ -12,7 +14,7 @@ class TaskStatus(IntEnum):
 class TaskBase(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)
     start_url: str = Field(..., min_length=1, max_length=2048)
-    parser_rules: str | None = None
+    parser_rules: str | None = Field(default=None, max_length=131072)
     cron_expr: str = Field(..., min_length=1, max_length=100)
     status: TaskStatus = TaskStatus.ENABLED
 
@@ -23,6 +25,11 @@ class TaskBase(BaseModel):
             raise ValueError("start_url must start with http:// or https://")
         return value
 
+    @field_validator("parser_rules")
+    @classmethod
+    def validate_parser_rules(cls, value: str | None) -> str | None:
+        return validate_parser_rules_str(value)
+
 
 class TaskCreate(TaskBase):
     pass
@@ -31,7 +38,7 @@ class TaskCreate(TaskBase):
 class TaskUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=255)
     start_url: str | None = Field(default=None, min_length=1, max_length=2048)
-    parser_rules: str | None = None
+    parser_rules: str | None = Field(default=None, max_length=131072)
     cron_expr: str | None = Field(default=None, min_length=1, max_length=100)
     status: TaskStatus | None = None
 
@@ -41,6 +48,11 @@ class TaskUpdate(BaseModel):
         if value is not None and not value.startswith(("http://", "https://")):
             raise ValueError("start_url must start with http:// or https://")
         return value
+
+    @field_validator("parser_rules")
+    @classmethod
+    def validate_parser_rules(cls, value: str | None) -> str | None:
+        return validate_parser_rules_str(value)
 
 
 class TaskRead(TaskBase):

@@ -95,14 +95,28 @@ class DataRepository:
             total_statement = total_statement.where(*filters)
         total = await self.session.scalar(total_statement) or 0
 
+        if filters:
+            statement = statement.where(*filters)
         statement = (
-            statement.where(*filters)
-            .order_by(CollectedData.fetch_time.desc(), CollectedData.id.desc())
+            statement.order_by(CollectedData.fetch_time.desc(), CollectedData.id.desc())
             .offset((page - 1) * page_size)
             .limit(page_size)
         )
         result = await self.session.execute(statement)
         return result.scalars().all(), total
+
+    async def list_recent_for_export(
+        self,
+        *,
+        task_id: int | None,
+        limit: int,
+    ) -> Sequence[CollectedData]:
+        statement = select(CollectedData)
+        if task_id is not None:
+            statement = statement.where(CollectedData.task_id == task_id)
+        statement = statement.order_by(CollectedData.id.desc()).limit(limit)
+        result = await self.session.execute(statement)
+        return result.scalars().all()
 
     async def update_snapshot_path(
         self,

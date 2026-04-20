@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../../core/constants/navigation_items.dart';
 import '../../core/network/api_client.dart';
+import '../../core/widgets/async_error_panel.dart';
 import '../../features/dashboard/presentation/pages/dashboard_page.dart';
 import '../../features/keyword_rules/presentation/pages/keyword_rules_page.dart';
 import '../../features/notices/presentation/pages/notices_page.dart';
@@ -142,6 +143,29 @@ class _AppShellState extends State<AppShell> {
                   child: FutureBuilder<List<TaskTemplateModel>>(
                     future: _templatesFuture,
                     builder: (context, snapshot) {
+                      if (snapshot.hasError) {
+                        return Center(
+                          child: ConstrainedBox(
+                            constraints: const BoxConstraints(maxWidth: 520),
+                            child: AsyncErrorPanel(
+                              error: snapshot.error!,
+                              title: '加载任务模板失败',
+                              onRetry: () {
+                                setState(() {
+                                  _templatesFuture =
+                                      _templateRepository.fetchTaskTemplates();
+                                });
+                              },
+                            ),
+                          ),
+                        );
+                      }
+                      if (snapshot.connectionState == ConnectionState.waiting &&
+                          !snapshot.hasData) {
+                        return const Center(
+                          child: CircularProgressIndicator(),
+                        );
+                      }
                       final templates =
                           snapshot.data ?? const <TaskTemplateModel>[];
                       return isCompact

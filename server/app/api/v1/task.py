@@ -3,7 +3,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from app.dependencies import get_task_service
 from app.schemas.common import ApiResponse, EmptyPayload, PageData
 from app.schemas.task import TaskCreate, TaskRead, TaskRunPayload, TaskUpdate
-from app.services.task_service import TaskService
+from app.services.crawl_service import TaskRunConflictError
+from app.services.task_service import TaskBusyError, TaskService
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
 
@@ -12,9 +13,30 @@ router = APIRouter(prefix="/tasks", tags=["tasks"])
 async def list_tasks(
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=100),
+    search: str | None = Query(default=None, max_length=200),
+    enabled: str = Query(default="all"),
+    last_run: str = Query(default="all"),
+    sort_by: str = Query(default="id"),
+    sort_dir: str = Query(default="desc"),
     service: TaskService = Depends(get_task_service),
 ) -> ApiResponse[PageData[TaskRead]]:
-    data = await service.list_tasks(page=page, page_size=page_size)
+    if enabled not in {"all", "enabled", "disabled"}:
+        raise HTTPException(status_code=400, detail="invalid enabled filter")
+    if last_run not in {"all", "success", "failed", "active", "never"}:
+        raise HTTPException(status_code=400, detail="invalid last_run filter")
+    if sort_by not in {"id", "name", "last_run_at", "created_at"}:
+        raise HTTPException(status_code=400, detail="invalid sort_by")
+    if sort_dir not in {"asc", "desc"}:
+        raise HTTPException(status_code=400, detail="invalid sort_dir")
+    data = await service.list_tasks(
+        page=page,
+        page_size=page_size,
+        search=search,
+        enabled=enabled,
+        last_run=last_run,
+        sort_by=sort_by,
+        sort_dir=sort_dir,
+    )
     return ApiResponse(data=data)
 
 
@@ -67,6 +89,8 @@ async def delete_task(
         return ApiResponse(data=data)
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except TaskBusyError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 @router.post("/{task_id}/run", response_model=ApiResponse[TaskRunPayload])
@@ -79,3 +103,5 @@ async def run_task(
         return ApiResponse(data=data)
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except TaskRunConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc

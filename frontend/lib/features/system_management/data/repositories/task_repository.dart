@@ -5,7 +5,15 @@ abstract class TaskRepository {
   Future<PageData<TaskListItemModel>> fetchTasks({
     int page = 1,
     int pageSize = 20,
+    String? search,
+    String enabled = 'all',
+    String lastRun = 'all',
+    String sortBy = 'id',
+    String sortDir = 'desc',
   });
+
+  /// Whether any task is queued or running (global, ignores list filters).
+  Future<bool> hasActiveOrQueuedTasksGlobally();
 
   Future<TaskListItemModel> createTask(TaskUpsertPayload payload);
 
@@ -21,6 +29,7 @@ abstract class TaskRepository {
     int taskId, {
     int page = 1,
     int pageSize = 10,
+    bool onlySummary = false,
   });
 
   Future<PageData<TaskLogItemModel>> fetchLogs({
@@ -28,6 +37,7 @@ abstract class TaskRepository {
     int pageSize = 20,
     int? taskId,
     String? level,
+    String? messageContains,
   });
 
   Future<LogSummaryModel> fetchLogSummary();

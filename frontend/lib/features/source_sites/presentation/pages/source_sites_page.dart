@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../../../core/utils/user_facing_error.dart';
 import '../../../system_management/data/models/task_template_models.dart';
 import '../../../system_management/data/repositories/http_template_repository.dart';
 
@@ -22,6 +23,78 @@ class SourceSitesPage extends StatefulWidget {
 }
 
 class _SourceSitesPageState extends State<SourceSitesPage> {
+  late final TextEditingController _templateSearchController;
+  String _sortKey = 'label';
+  bool _sortAscending = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _templateSearchController = TextEditingController()
+      ..addListener(() {
+        if (mounted) {
+          setState(() {});
+        }
+      });
+  }
+
+  @override
+  void dispose() {
+    _templateSearchController.dispose();
+    super.dispose();
+  }
+
+  List<TaskTemplateModel> _visibleTemplates() {
+    final q = _templateSearchController.text.trim().toLowerCase();
+    final list = List<TaskTemplateModel>.from(widget.templates);
+    if (q.isNotEmpty) {
+      list.retainWhere((t) {
+        if (t.label.toLowerCase().contains(q)) {
+          return true;
+        }
+        if (t.name.toLowerCase().contains(q)) {
+          return true;
+        }
+        if (t.description.toLowerCase().contains(q)) {
+          return true;
+        }
+        if (t.startUrl.toLowerCase().contains(q)) {
+          return true;
+        }
+        if (t.id.toLowerCase().contains(q)) {
+          return true;
+        }
+        return t.tags.any((tag) => tag.toLowerCase().contains(q));
+      });
+    }
+
+    int cmp(TaskTemplateModel a, TaskTemplateModel b) {
+      switch (_sortKey) {
+        case 'usage':
+          return a.usageCount.compareTo(b.usageCount);
+        case 'last_used':
+          if (a.lastUsedAt == null && b.lastUsedAt == null) {
+            return 0;
+          }
+          if (a.lastUsedAt == null) {
+            return 1;
+          }
+          if (b.lastUsedAt == null) {
+            return -1;
+          }
+          return a.lastUsedAt!.compareTo(b.lastUsedAt!);
+        default:
+          return a.label.toLowerCase().compareTo(b.label.toLowerCase());
+      }
+    }
+
+    list.sort((a, b) {
+      final c = cmp(a, b);
+      return _sortAscending ? c : -c;
+    });
+    return list;
+  }
+
   Future<void> _useTemplate(TaskTemplateModel template) async {
     try {
       await widget.templateRepository.trackTaskTemplateUse(template.id);
@@ -33,7 +106,7 @@ class _SourceSitesPageState extends State<SourceSitesPage> {
       }
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('套用模板失败：$error'),
+          content: Text('套用模板失败：${userFacingError(error)}'),
           backgroundColor: const Color(0xFFB3261E),
         ),
       );
@@ -41,16 +114,43 @@ class _SourceSitesPageState extends State<SourceSitesPage> {
   }
 
   Future<void> _openTemplateEditor([TaskTemplateModel? template]) async {
-    final saved = await showDialog<bool>(
-      context: context,
-      builder: (context) => _TemplateEditorDialog(
-        template: template,
-        repository: widget.templateRepository,
-      ),
-    );
+    bool? saved;
+    try {
+      saved = await showDialog<bool>(
+        context: context,
+        builder: (context) => _TemplateEditorDialog(
+          template: template,
+          repository: widget.templateRepository,
+        ),
+      );
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('打开模板编辑器失败：${userFacingError(error)}'),
+          backgroundColor: const Color(0xFFB3261E),
+        ),
+      );
+      return;
+    }
 
     if (saved == true && mounted) {
-      await widget.onTemplatesChanged();
+      try {
+        await widget.onTemplatesChanged();
+      } catch (error) {
+        if (!mounted) {
+          return;
+        }
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('刷新模板列表失败：${userFacingError(error)}'),
+            backgroundColor: const Color(0xFFB3261E),
+          ),
+        );
+        return;
+      }
       if (!mounted) {
         return;
       }
@@ -100,7 +200,7 @@ class _SourceSitesPageState extends State<SourceSitesPage> {
       }
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('删除模板失败：$error'),
+          content: Text('删除模板失败：${userFacingError(error)}'),
           backgroundColor: const Color(0xFFB3261E),
         ),
       );
@@ -109,6 +209,7 @@ class _SourceSitesPageState extends State<SourceSitesPage> {
 
   @override
   Widget build(BuildContext context) {
+    final visible = _visibleTemplates();
     return Padding(
       padding: const EdgeInsets.all(24),
       child: Column(
@@ -124,118 +225,294 @@ class _SourceSitesPageState extends State<SourceSitesPage> {
                 ? _SourceSitesEmptyState(
                     onCreate: () => _openTemplateEditor(),
                   )
-                : Scrollbar(
-                    thumbVisibility: true,
-                    child: ListView.separated(
-                      itemCount: widget.templates.length,
-                      separatorBuilder: (_, __) => const SizedBox(height: 16),
-                      itemBuilder: (context, index) {
-                        final template = widget.templates[index];
-                        return Card(
-                          child: Container(
-                            decoration: BoxDecoration(
-                              gradient: LinearGradient(
-                                begin: Alignment.topLeft,
-                                end: Alignment.bottomRight,
-                                colors: [
-                                  const Color(0xFF1E4F8A)
-                                      .withValues(alpha: 0.05),
-                                  Colors.white,
-                                ],
-                              ),
-                            ),
-                            child: Padding(
-                              padding: const EdgeInsets.all(20),
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Row(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
+                : Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      _TemplateFilterBar(
+                        searchController: _templateSearchController,
+                        sortKey: _sortKey,
+                        sortAscending: _sortAscending,
+                        onSortKeyChanged: (v) {
+                          setState(() {
+                            _sortKey = v;
+                          });
+                        },
+                        onToggleAscending: () {
+                          setState(() {
+                            _sortAscending = !_sortAscending;
+                          });
+                        },
+                        onClearSearch: () {
+                          _templateSearchController.clear();
+                        },
+                        matchCount: visible.length,
+                        totalCount: widget.templates.length,
+                      ),
+                      const SizedBox(height: 12),
+                      Expanded(
+                        child: visible.isEmpty
+                            ? Card(
+                                child: Padding(
+                                  padding: const EdgeInsets.all(28),
+                                  child: Column(
+                                    mainAxisAlignment: MainAxisAlignment.center,
                                     children: [
-                                      Expanded(
-                                        child: Text(
-                                          template.label,
-                                          style: Theme.of(context)
-                                              .textTheme
-                                              .titleLarge,
-                                        ),
+                                      Text(
+                                        '没有匹配的模板',
+                                        style: Theme.of(context)
+                                            .textTheme
+                                            .titleMedium,
                                       ),
-                                      Wrap(
-                                        spacing: 8,
-                                        runSpacing: 8,
-                                        children: template.tags
-                                            .map(
-                                                (tag) => Chip(label: Text(tag)))
-                                            .toList(),
+                                      const SizedBox(height: 8),
+                                      Text(
+                                        '试试缩短关键词，或清空搜索。',
+                                        style: Theme.of(context)
+                                            .textTheme
+                                            .bodyMedium,
+                                      ),
+                                      const SizedBox(height: 16),
+                                      OutlinedButton(
+                                        onPressed: () {
+                                          _templateSearchController.clear();
+                                        },
+                                        child: const Text('清空搜索'),
                                       ),
                                     ],
                                   ),
-                                  const SizedBox(height: 12),
-                                  Text(
-                                    template.description,
-                                    style:
-                                        Theme.of(context).textTheme.bodyMedium,
-                                  ),
-                                  const SizedBox(height: 16),
-                                  _TemplateMetaRow(
-                                    label: '建议任务名',
-                                    value: template.name,
-                                  ),
-                                  _TemplateMetaRow(
-                                    label: '起始地址',
-                                    value: template.startUrl,
-                                  ),
-                                  _TemplateMetaRow(
-                                    label: '定时表达式',
-                                    value: template.cronExpr,
-                                  ),
-                                  _TemplateMetaRow(
-                                    label: '解析规则',
-                                    value: template.parserRules ?? '使用可读性兜底解析',
-                                  ),
-                                  _TemplateMetaRow(
-                                    label: '使用情况',
-                                    value: '已使用 ${template.usageCount} 次'
-                                        '${template.lastUsedAt == null ? '' : ' · 最近使用 ${template.lastUsedAt}'}',
-                                  ),
-                                  const SizedBox(height: 8),
-                                  Wrap(
-                                    spacing: 8,
-                                    runSpacing: 8,
-                                    children: [
-                                      FilledButton.tonal(
-                                        onPressed: widget.onUseTemplate == null
-                                            ? null
-                                            : () => _useTemplate(template),
-                                        child: const Text('使用此模板'),
-                                      ),
-                                      OutlinedButton(
-                                        onPressed: () =>
-                                            _openTemplateEditor(template),
-                                        child: const Text('编辑'),
-                                      ),
-                                      OutlinedButton(
-                                        onPressed: () =>
-                                            _deleteTemplate(template),
-                                        style: OutlinedButton.styleFrom(
-                                          foregroundColor:
-                                              const Color(0xFFB3261E),
+                                ),
+                              )
+                            : Scrollbar(
+                                thumbVisibility: true,
+                                child: ListView.separated(
+                                  itemCount: visible.length,
+                                  separatorBuilder: (_, __) =>
+                                      const SizedBox(height: 16),
+                                  itemBuilder: (context, index) {
+                                    final template = visible[index];
+                                    return Card(
+                                      child: Container(
+                                        decoration: BoxDecoration(
+                                          gradient: LinearGradient(
+                                            begin: Alignment.topLeft,
+                                            end: Alignment.bottomRight,
+                                            colors: [
+                                              const Color(0xFF1E4F8A)
+                                                  .withValues(alpha: 0.05),
+                                              Colors.white,
+                                            ],
+                                          ),
                                         ),
-                                        child: const Text('删除'),
+                                        child: Padding(
+                                          padding: const EdgeInsets.all(20),
+                                          child: Column(
+                                            crossAxisAlignment:
+                                                CrossAxisAlignment.start,
+                                            children: [
+                                              Row(
+                                                crossAxisAlignment:
+                                                    CrossAxisAlignment.start,
+                                                children: [
+                                                  Expanded(
+                                                    child: Text(
+                                                      template.label,
+                                                      style: Theme.of(context)
+                                                          .textTheme
+                                                          .titleLarge,
+                                                    ),
+                                                  ),
+                                                  Wrap(
+                                                    spacing: 8,
+                                                    runSpacing: 8,
+                                                    children: template.tags
+                                                        .map(
+                                                          (tag) => Chip(
+                                                            label: Text(tag),
+                                                          ),
+                                                        )
+                                                        .toList(),
+                                                  ),
+                                                ],
+                                              ),
+                                              const SizedBox(height: 12),
+                                              Text(
+                                                template.description,
+                                                style: Theme.of(context)
+                                                    .textTheme
+                                                    .bodyMedium,
+                                              ),
+                                              const SizedBox(height: 16),
+                                              _TemplateMetaRow(
+                                                label: '建议任务名',
+                                                value: template.name,
+                                              ),
+                                              _TemplateMetaRow(
+                                                label: '起始地址',
+                                                value: template.startUrl,
+                                              ),
+                                              _TemplateMetaRow(
+                                                label: '定时表达式',
+                                                value: template.cronExpr,
+                                              ),
+                                              _TemplateMetaRow(
+                                                label: '解析规则',
+                                                value: template.parserRules ??
+                                                    '使用可读性兜底解析',
+                                              ),
+                                              _TemplateMetaRow(
+                                                label: '使用情况',
+                                                value:
+                                                    '已使用 ${template.usageCount} 次'
+                                                    '${template.lastUsedAt == null ? '' : ' · 最近使用 ${template.lastUsedAt}'}',
+                                              ),
+                                              const SizedBox(height: 8),
+                                              Wrap(
+                                                spacing: 8,
+                                                runSpacing: 8,
+                                                children: [
+                                                  FilledButton.tonal(
+                                                    onPressed: widget
+                                                                .onUseTemplate ==
+                                                            null
+                                                        ? null
+                                                        : () => _useTemplate(
+                                                              template,
+                                                            ),
+                                                    child: const Text('使用此模板'),
+                                                  ),
+                                                  OutlinedButton(
+                                                    onPressed: () =>
+                                                        _openTemplateEditor(
+                                                          template,
+                                                        ),
+                                                    child: const Text('编辑'),
+                                                  ),
+                                                  OutlinedButton(
+                                                    onPressed: () =>
+                                                        _deleteTemplate(
+                                                          template,
+                                                        ),
+                                                    style: OutlinedButton
+                                                        .styleFrom(
+                                                      foregroundColor:
+                                                          const Color(
+                                                        0xFFB3261E,
+                                                      ),
+                                                    ),
+                                                    child: const Text('删除'),
+                                                  ),
+                                                ],
+                                              ),
+                                            ],
+                                          ),
+                                        ),
                                       ),
-                                    ],
-                                  ),
-                                ],
+                                    );
+                                  },
+                                ),
                               ),
                             ),
-                          ),
-                        );
-                      },
+                      ],
                     ),
                   ),
-          ),
         ],
+      ),
+    );
+  }
+}
+
+class _TemplateFilterBar extends StatelessWidget {
+  final TextEditingController searchController;
+  final String sortKey;
+  final bool sortAscending;
+  final ValueChanged<String> onSortKeyChanged;
+  final VoidCallback onToggleAscending;
+  final VoidCallback onClearSearch;
+  final int matchCount;
+  final int totalCount;
+
+  const _TemplateFilterBar({
+    required this.searchController,
+    required this.sortKey,
+    required this.sortAscending,
+    required this.onSortKeyChanged,
+    required this.onToggleAscending,
+    required this.onClearSearch,
+    required this.matchCount,
+    required this.totalCount,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        child: Wrap(
+          spacing: 12,
+          runSpacing: 12,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          children: [
+            SizedBox(
+              width: 260,
+              child: TextField(
+                controller: searchController,
+                decoration: const InputDecoration(
+                  labelText: '搜索模板',
+                  hintText: '名称、描述、URL、标签、ID',
+                  prefixIcon: Icon(Icons.search),
+                  isDense: true,
+                  border: OutlineInputBorder(),
+                ),
+              ),
+            ),
+            SizedBox(
+              width: 200,
+              child: InputDecorator(
+                decoration: const InputDecoration(
+                  labelText: '排序',
+                  isDense: true,
+                  border: OutlineInputBorder(),
+                  contentPadding:
+                      EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                ),
+                child: DropdownButtonHideUnderline(
+                  child: DropdownButton<String>(
+                    isExpanded: true,
+                    value: sortKey,
+                    items: const [
+                      DropdownMenuItem(value: 'label', child: Text('按名称')),
+                      DropdownMenuItem(value: 'usage', child: Text('按使用次数')),
+                      DropdownMenuItem(
+                        value: 'last_used',
+                        child: Text('按最近使用'),
+                      ),
+                    ],
+                    onChanged: (v) {
+                      if (v != null) {
+                        onSortKeyChanged(v);
+                      }
+                    },
+                  ),
+                ),
+              ),
+            ),
+            IconButton.filledTonal(
+              tooltip: sortAscending ? '当前升序，点击改为降序' : '当前降序，点击改为升序',
+              onPressed: onToggleAscending,
+              icon: Icon(
+                sortAscending ? Icons.arrow_upward : Icons.arrow_downward,
+              ),
+            ),
+            TextButton.icon(
+              onPressed: onClearSearch,
+              icon: const Icon(Icons.clear, size: 18),
+              label: const Text('清空搜索'),
+            ),
+            Text(
+              '显示 $matchCount / $totalCount',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -533,7 +810,7 @@ class _TemplateEditorDialogState extends State<_TemplateEditorDialog> {
       Navigator.of(context).pop(true);
     } catch (error) {
       setState(() {
-        _submitError = '$error';
+        _submitError = userFacingError(error);
       });
     } finally {
       if (mounted) {
@@ -581,18 +858,31 @@ class _TemplateEditorDialogState extends State<_TemplateEditorDialog> {
 
       setState(() {
         if (res.error != null) {
-          _testResult = '测试出错：\n${res.error}';
+          final t = res.trace;
+          final traceLines = t == null
+              ? ''
+              : '\n抓取：${t.fetch ?? '-'}\n'
+                  '正文来源：${t.contentSource ?? '-'}\n'
+                  '${t.notes.isEmpty ? '' : '说明：\n${t.notes.map((n) => '  · $n').join('\n')}\n'}';
+          _testResult = '测试出错：$traceLines\n${res.error}';
         } else {
           final contentPreview = res.contentText != null
               ? (res.contentText!.length > 300
                   ? '${res.contentText!.substring(0, 300)}...\n[剩余内容已截断]'
                   : res.contentText!)
               : '无';
+          final t = res.trace;
+          final traceLines = t == null
+              ? ''
+              : '\n抓取：${t.fetch ?? '-'}\n'
+                  '正文来源：${t.contentSource ?? '-'}\n'
+                  '${t.notes.isEmpty ? '' : '说明：\n${t.notes.map((n) => '  · $n').join('\n')}\n'}';
           _testResult = '测试成功：\n'
               '标题：${res.title ?? '未提取到标题'}\n'
               '质量分：${res.qualityScore ?? 0}\n'
               '正文长度：${res.contentText?.length ?? 0} 字符\n'
               'HTML长度：${res.contentHtml?.length ?? 0} 字符\n'
+              '$traceLines'
               '------------------------------\n'
               '正文预览：\n$contentPreview';
         }
@@ -600,7 +890,7 @@ class _TemplateEditorDialogState extends State<_TemplateEditorDialog> {
     } catch (e) {
       if (!mounted) return;
       setState(() {
-        _testResult = '请求异常：$e';
+        _testResult = '请求异常：${userFacingError(e)}';
       });
     } finally {
       if (mounted) {

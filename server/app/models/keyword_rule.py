@@ -2,7 +2,7 @@ from datetime import datetime
 from sqlalchemy import Boolean, DateTime, Integer, String, func
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.core.database import Base
+from app.core.models_base import Base
 
 class KeywordRule(Base):
     __tablename__ = "keyword_rules"

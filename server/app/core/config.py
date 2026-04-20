@@ -11,8 +11,8 @@ class Settings(BaseSettings):
     timeout: int = 30
     snapshot_dir: str = "storage/snapshots"
     export_dir: str = "storage/exports"
-    default_admin_username: str = "运营管理员"
-    default_admin_password: str = "admin123"
+    default_admin_username: str = "madao"
+    default_admin_password: str = "666666"
     session_ttl_days: int = 7
 
     model_config = SettingsConfigDict(

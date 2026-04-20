@@ -9,6 +9,11 @@ from app.schemas.task import TaskRunPayload
 
 _background_tasks = set()
 
+
+class TaskRunConflictError(RuntimeError):
+    """Raised when a manual run is requested while the task is already queued or running."""
+
+
 class CrawlService:
     def __init__(self, task_repo: TaskRepository, log_repo: LogRepository):
         self.task_repo = task_repo
@@ -24,12 +29,26 @@ class CrawlService:
             )
             raise LookupError(f"Task {task_id} not found")
 
-        await self.task_repo.update_run_state(
-            task,
-            last_run_status="running",
-            last_run_at=datetime.now(timezone.utc),
-            last_error_message=None,
-        )
+        run_at = datetime.now(timezone.utc)
+        if not await self.task_repo.try_mark_running(task_id, run_at=run_at):
+            await self.log_repo.create(
+                level="INFO",
+                task_id=task_id,
+                message=(
+                    f"Task {task_id} execution skipped "
+                    f"(already running or lost concurrent claim to another worker)"
+                ),
+            )
+            return
+
+        task = await self.task_repo.get_by_id(task_id)
+        if task is None:
+            await self.log_repo.create(
+                level="ERROR",
+                task_id=task_id,
+                message=f"Task {task_id} disappeared after run claim",
+            )
+            raise LookupError(f"Task {task_id} not found")
 
         pipeline_module = import_module("app.engine.pipeline")
         pipeline_runner = getattr(pipeline_module, "run_task", None)
@@ -82,11 +101,12 @@ class CrawlService:
         if task is None:
             raise LookupError(f"Task {task_id} not found")
 
-        await self.task_repo.update_run_state(
-            task,
-            last_run_status="queued",
-            last_error_message=None,
-        )
+        now = datetime.now(timezone.utc)
+        if not await self.task_repo.try_mark_run_queued(task_id, run_at=now):
+            raise TaskRunConflictError(
+                f"Task {task_id} is already running or queued; wait for completion."
+            )
+
         task_coro = asyncio.create_task(dispatch_task_run(task_id))
         _background_tasks.add(task_coro)
         task_coro.add_done_callback(_background_tasks.discard)

@@ -31,6 +31,12 @@ class HttpDashboardRepository implements DashboardRepository {
         monitoringSiteCount: 0,
         highPriorityNotices: 0,
       ),
+      runtime: DashboardRuntimeModel(
+        status: 'unknown',
+        database: 'unknown',
+        scheduler: 'unknown',
+        scheduledJobs: 0,
+      ),
       highValueNotices: [],
       recentNotices: [],
       keywordHeat: [],

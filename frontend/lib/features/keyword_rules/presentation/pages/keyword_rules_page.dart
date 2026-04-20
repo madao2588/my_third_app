@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../../../../core/utils/user_facing_error.dart';
+import '../../../../core/widgets/async_error_panel.dart';
 import '../../../../shared/models/page_data.dart';
 import '../../data/models/keyword_rule_model.dart';
 import '../../data/repositories/http_keyword_rule_repository.dart';
@@ -37,18 +39,13 @@ class _KeywordRulesPageState extends State<KeywordRulesPage> {
           return const Center(child: CircularProgressIndicator());
         } else if (snapshot.hasError) {
           return Center(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                const Icon(Icons.error_outline, color: Colors.red, size: 48),
-                const SizedBox(height: 16),
-                Text('加载失败\n${snapshot.error}', textAlign: TextAlign.center),
-                const SizedBox(height: 16),
-                FilledButton(
-                  onPressed: _refresh,
-                  child: const Text('重试'),
-                ),
-              ],
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 520),
+              child: AsyncErrorPanel(
+                error: snapshot.error!,
+                title: '加载关键字规则失败',
+                onRetry: _refresh,
+              ),
             ),
           );
         }
@@ -249,7 +246,9 @@ class _KeywordRulesPageState extends State<KeywordRulesPage> {
                     } catch (e) {
                       if (!context.mounted) return;
                       ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(content: Text('保存失败: $e')),
+                        SnackBar(
+                          content: Text('保存失败：${userFacingError(e)}'),
+                        ),
                       );
                     }
                   },
@@ -279,7 +278,7 @@ class _KeywordRulesPageState extends State<KeywordRulesPage> {
     } catch (e) {
       if (!context.mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('更新失败: $e')),
+        SnackBar(content: Text('更新失败：${userFacingError(e)}')),
       );
     }
   }
@@ -292,7 +291,7 @@ class _KeywordRulesPageState extends State<KeywordRulesPage> {
     } catch (e) {
       if (!context.mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('操作失败: $e')),
+        SnackBar(content: Text('操作失败：${userFacingError(e)}')),
       );
     }
   }
@@ -323,7 +322,7 @@ class _KeywordRulesPageState extends State<KeywordRulesPage> {
     } catch (e) {
       if (!context.mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('删除失败: $e')),
+        SnackBar(content: Text('删除失败：${userFacingError(e)}')),
       );
     }
   }

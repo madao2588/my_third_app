@@ -11,9 +11,8 @@ except ModuleNotFoundError:  # pragma: no cover - environment-specific fallback
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-from sqlalchemy.orm import DeclarativeBase
-
 from app.core.config import get_settings
+from app.core.models_base import Base
 
 
 settings = get_settings()
@@ -40,10 +39,6 @@ AsyncSessionLocal = async_sessionmaker(
 )
 
 
-class Base(DeclarativeBase):
-    pass
-
-
 async def init_db() -> None:
     # Import models here so metadata is fully populated before table creation.
     from app.models.auth import User, UserSession  # noqa: F401
@@ -51,11 +46,11 @@ async def init_db() -> None:
     from app.models.log import LogEntry  # noqa: F401
     from app.models.task import Task  # noqa: F401
     from app.models.keyword_rule import KeywordRule  # noqa: F401
-    from app.models.keyword_rule import KeywordRule  # noqa: F401
 
     async with engine.begin() as connection:
         await connection.run_sync(Base.metadata.create_all)
         await _migrate_task_table(connection)
+        await _migrate_log_table(connection)
 
 
 async def _migrate_task_table(connection) -> None:
@@ -72,6 +67,20 @@ async def _migrate_task_table(connection) -> None:
             continue
         await connection.execute(
             text(f"ALTER TABLE tasks ADD COLUMN {column_name} {column_type}")
+        )
+
+
+async def _migrate_log_table(connection) -> None:
+    result = await connection.execute(text("PRAGMA table_info(logs)"))
+    existing_columns = {row[1] for row in result.fetchall()}
+    required_columns = {
+        "run_summary": "TEXT",
+    }
+    for column_name, column_type in required_columns.items():
+        if column_name in existing_columns:
+            continue
+        await connection.execute(
+            text(f"ALTER TABLE logs ADD COLUMN {column_name} {column_type}")
         )
 
 

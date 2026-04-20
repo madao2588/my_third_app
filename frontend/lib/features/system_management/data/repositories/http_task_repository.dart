@@ -16,13 +16,26 @@ class HttpTaskRepository implements TaskRepository {
   Future<PageData<TaskListItemModel>> fetchTasks({
     int page = 1,
     int pageSize = 20,
+    String? search,
+    String enabled = 'all',
+    String lastRun = 'all',
+    String sortBy = 'id',
+    String sortDir = 'desc',
   }) async {
+    final queryParameters = <String, String>{
+      'page': '$page',
+      'page_size': '$pageSize',
+      'enabled': enabled,
+      'last_run': lastRun,
+      'sort_by': sortBy,
+      'sort_dir': sortDir,
+    };
+    if (search != null && search.trim().isNotEmpty) {
+      queryParameters['search'] = search.trim();
+    }
     final json = await apiClient.getJson(
       ApiPaths.tasks,
-      queryParameters: {
-        'page': '$page',
-        'page_size': '$pageSize',
-      },
+      queryParameters: queryParameters,
     );
 
     final response = ApiResponse<PageData<TaskListItemModel>>.fromJson(
@@ -40,6 +53,16 @@ class HttpTaskRepository implements TaskRepository {
           page: 1,
           pageSize: 20,
         );
+  }
+
+  @override
+  Future<bool> hasActiveOrQueuedTasksGlobally() async {
+    final page = await fetchTasks(
+      page: 1,
+      pageSize: 1,
+      lastRun: 'active',
+    );
+    return page.total > 0;
   }
 
   @override
@@ -111,14 +134,19 @@ class HttpTaskRepository implements TaskRepository {
     int taskId, {
     int page = 1,
     int pageSize = 10,
+    bool onlySummary = false,
   }) async {
+    final queryParameters = <String, String>{
+      'task_id': '$taskId',
+      'page': '$page',
+      'page_size': '$pageSize',
+    };
+    if (onlySummary) {
+      queryParameters['only_summary'] = 'true';
+    }
     final json = await apiClient.getJson(
       ApiPaths.logs,
-      queryParameters: {
-        'task_id': '$taskId',
-        'page': '$page',
-        'page_size': '$pageSize',
-      },
+      queryParameters: queryParameters,
     );
     final response = ApiResponse<PageData<TaskLogItemModel>>.fromJson(
       json,
@@ -143,6 +171,7 @@ class HttpTaskRepository implements TaskRepository {
     int pageSize = 20,
     int? taskId,
     String? level,
+    String? messageContains,
   }) async {
     final queryParameters = <String, String>{
       'page': '$page',
@@ -153,6 +182,9 @@ class HttpTaskRepository implements TaskRepository {
     }
     if (level != null && level.isNotEmpty) {
       queryParameters['level'] = level;
+    }
+    if (messageContains != null && messageContains.isNotEmpty) {
+      queryParameters['message_contains'] = messageContains;
     }
 
     final json = await apiClient.getJson(

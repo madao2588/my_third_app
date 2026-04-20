@@ -14,8 +14,13 @@ class ApiResponse(BaseModel, Generic[T]):
 
 
 class HealthPayload(BaseModel):
+    """本地/运维探活：整体状态 + 依赖子项，便于排查「调度是否在跑、库是否可连」。"""
+
     status: str
     app_name: str
+    database: str = "unknown"
+    scheduler: str = "unknown"
+    scheduled_jobs: int = Field(default=0, ge=0)
 
 
 class EmptyPayload(BaseModel):
@@ -34,12 +39,19 @@ class PageData(BaseModel, Generic[T]):
     page_size: int = Field(..., ge=1, le=100)
 
 
+class RunSummaryPayload(BaseModel):
+    run_id: str | None = None
+    mode: str
+    metrics: dict[str, str | int | bool]
+
+
 class LogRead(BaseModel):
     id: int
     task_id: int | None = None
     level: str
     message: str
     error_stack: str | None = None
+    run_summary: RunSummaryPayload | None = None
     created_at: datetime
 
     model_config = {"from_attributes": True}

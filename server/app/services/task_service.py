@@ -11,6 +11,10 @@ from app.schemas.task import TaskCreate, TaskRead, TaskRunPayload, TaskStatus, T
 from app.services.crawl_service import CrawlService, dispatch_task_run
 
 
+class TaskBusyError(RuntimeError):
+    """Raised when deleting or mutating a task that is still running or queued."""
+
+
 class TaskService:
     def __init__(
         self,
@@ -24,8 +28,29 @@ class TaskService:
         self.crawl_service = crawl_service
         self.scheduler = scheduler or get_scheduler()
 
-    async def list_tasks(self, *, page: int, page_size: int) -> PageData[TaskRead]:
-        items, total = await self.task_repo.list_paginated(page=page, page_size=page_size)
+    async def list_tasks(
+        self,
+        *,
+        page: int,
+        page_size: int,
+        search: str | None = None,
+        enabled: str | None = None,
+        last_run: str | None = None,
+        sort_by: str | None = None,
+        sort_dir: str | None = None,
+    ) -> PageData[TaskRead]:
+        needle = (search or "").strip()
+        if len(needle) > 200:
+            needle = needle[:200]
+        items, total = await self.task_repo.list_paginated(
+            page=page,
+            page_size=page_size,
+            search=needle or None,
+            enabled=enabled,
+            last_run=last_run,
+            sort_by=sort_by,
+            sort_dir=sort_dir,
+        )
         return PageData[TaskRead](
             items=[TaskRead.model_validate(item) for item in items],
             total=total,
@@ -66,6 +91,10 @@ class TaskService:
 
     async def delete_task(self, task_id: int) -> EmptyPayload:
         task = await self._get_task_or_raise(task_id)
+        if task.last_run_status in ("running", "queued"):
+            raise TaskBusyError(
+                f"Task {task_id} is {task.last_run_status}; wait for completion or try again later."
+            )
         self._remove_job(task.id)
         await self.task_repo.delete(task)
         await self.log_repo.create(

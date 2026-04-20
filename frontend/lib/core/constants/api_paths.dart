@@ -1,5 +1,6 @@
 class ApiPaths {
   static const dashboardOverview = '/v1/dashboard/overview';
+  static const dataExportCsv = '/v1/data/export/csv';
   static const notices = '/v1/notices';
   static const tasks = '/v1/tasks';
   static const logs = '/v1/logs';

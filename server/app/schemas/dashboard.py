@@ -23,8 +23,18 @@ class DashboardMetrics(BaseModel):
     high_priority_notices: int = Field(..., ge=0)
 
 
+class DashboardRuntime(BaseModel):
+    """与 /health 一致的本地运行态，便于控制台首页自检。"""
+
+    status: str
+    database: str
+    scheduler: str
+    scheduled_jobs: int = Field(default=0, ge=0)
+
+
 class DashboardOverview(BaseModel):
     metrics: DashboardMetrics
+    runtime: DashboardRuntime
     high_value_notices: list[NoticeListItem]
     recent_notices: list[NoticeListItem]
     keyword_heat: list[KeywordHeatItem]

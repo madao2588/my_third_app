@@ -18,12 +18,16 @@ class HttpNoticeRepository implements NoticeRepository {
     int pageSize = 20,
     String? keyword,
   }) async {
+    final queryParameters = <String, String>{
+      'page': '$page',
+      'page_size': '$pageSize',
+    };
+    if (keyword != null && keyword.trim().isNotEmpty) {
+      queryParameters['keyword'] = keyword.trim();
+    }
     final json = await apiClient.getJson(
       ApiPaths.notices,
-      queryParameters: {
-        'page': '$page',
-        'page_size': '$pageSize',
-      },
+      queryParameters: queryParameters,
     );
 
     final response = ApiResponse<PageData<NoticeListItemModel>>.fromJson(
@@ -53,6 +57,18 @@ class HttpNoticeRepository implements NoticeRepository {
       ),
     );
     return response.data ?? _emptyDetail(id);
+  }
+
+  @override
+  Future<List<int>> downloadCollectedDataExport({
+    int limit = 5000,
+    int? taskId,
+  }) async {
+    final q = <String, String>{'limit': '$limit'};
+    if (taskId != null) {
+      q['task_id'] = '$taskId';
+    }
+    return apiClient.getBytes(ApiPaths.dataExportCsv, queryParameters: q);
   }
 
   @override

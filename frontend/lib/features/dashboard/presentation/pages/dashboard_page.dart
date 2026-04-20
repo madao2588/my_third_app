@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../../../core/network/api_client.dart';
 import '../../../../core/utils/date_formatter.dart';
+import '../../../../core/widgets/async_error_panel.dart';
 import '../../data/models/dashboard_models.dart';
 import '../../data/repositories/http_dashboard_repository.dart';
 import '../../../notices/data/models/notice_models.dart';
@@ -43,6 +44,8 @@ class _DashboardPageState extends State<DashboardPage> {
             children: [
               _DashboardHero(
                 lastUpdatedAt: snapshot.data?.lastUpdatedAt,
+                runtime: snapshot.data?.runtime ??
+                    DashboardRuntimeModel.fromJson(null),
                 onRefresh: _refresh,
               ),
               const SizedBox(height: 16),
@@ -78,11 +81,10 @@ class _DashboardPageState extends State<DashboardPage> {
     }
 
     if (snapshot.hasError) {
-      return Card(
-        child: Padding(
-          padding: const EdgeInsets.all(20),
-          child: Text('加载首页看板失败: ${snapshot.error}'),
-        ),
+      return AsyncErrorPanel(
+        error: snapshot.error!,
+        title: '加载首页看板失败',
+        onRetry: _refresh,
       );
     }
 
@@ -415,10 +417,12 @@ class _SectionCard extends StatelessWidget {
 
 class _DashboardHero extends StatelessWidget {
   final String? lastUpdatedAt;
+  final DashboardRuntimeModel runtime;
   final Future<void> Function() onRefresh;
 
   const _DashboardHero({
     required this.lastUpdatedAt,
+    required this.runtime,
     required this.onRefresh,
   });
 
@@ -487,6 +491,31 @@ class _DashboardHero extends StatelessWidget {
                       color: Color(0x1AFFFFFF),
                       textColor: Colors.white,
                       borderColor: Color(0x33FFFFFF),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 14),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    _InfoChip(
+                      label: '数据库 · ${runtime.database}',
+                      color: const Color(0x24FFFFFF),
+                      textColor: Colors.white,
+                      borderColor: const Color(0x44FFFFFF),
+                    ),
+                    _InfoChip(
+                      label: '调度器 · ${runtime.scheduler}',
+                      color: const Color(0x24FFFFFF),
+                      textColor: Colors.white,
+                      borderColor: const Color(0x44FFFFFF),
+                    ),
+                    _InfoChip(
+                      label: '定时任务 · ${runtime.scheduledJobs}',
+                      color: const Color(0x24FFFFFF),
+                      textColor: Colors.white,
+                      borderColor: const Color(0x44FFFFFF),
                     ),
                   ],
                 ),

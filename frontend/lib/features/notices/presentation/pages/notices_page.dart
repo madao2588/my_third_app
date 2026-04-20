@@ -1,8 +1,14 @@
 import 'dart:async';
+import 'dart:typed_data';
+
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 
+import '../../../../core/export_download.dart';
 import '../../../../core/network/api_client.dart';
 import '../../../../core/utils/date_formatter.dart';
+import '../../../../core/utils/user_facing_error.dart';
+import '../../../../core/widgets/async_error_panel.dart';
 import '../../../../shared/models/page_data.dart';
 import '../../data/models/notice_models.dart';
 import '../../data/repositories/http_notice_repository.dart';
@@ -21,18 +27,22 @@ class _NoticesPageState extends State<NoticesPage> {
   Future<NoticeDetailModel>? _detailFuture;
   int? _selectedNoticeId;
   Timer? _autoRefreshTimer;
-  final ScrollController _horizontalScrollController = ScrollController();
+  final ScrollController _listScrollController = ScrollController();
+  final ScrollController _detailScrollController = ScrollController();
   final TextEditingController _searchController = TextEditingController();
 
   int _currentPage = 1;
   final int _pageSize = 20;
   String? _keyword;
+  bool _exportingCsv = false;
+  bool _compactShowDetail = false;
 
   @override
   void dispose() {
     _autoRefreshTimer?.cancel();
     _searchController.dispose();
-    _horizontalScrollController.dispose();
+    _listScrollController.dispose();
+    _detailScrollController.dispose();
     super.dispose();
   }
 
@@ -75,6 +85,47 @@ class _NoticesPageState extends State<NoticesPage> {
     await _noticesFuture;
   }
 
+  Future<void> _exportCollectedCsv() async {
+    if (_exportingCsv) {
+      return;
+    }
+    setState(() {
+      _exportingCsv = true;
+    });
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      final bytes = await _repository.downloadCollectedDataExport(limit: 5000);
+      final path = await triggerFileDownload(
+        Uint8List.fromList(bytes),
+        'collected_data_export.csv',
+      );
+      if (!mounted) {
+        return;
+      }
+      if (path != null) {
+        messenger.showSnackBar(
+          SnackBar(content: Text('已写入临时文件：$path')),
+        );
+      } else {
+        messenger.showSnackBar(
+          const SnackBar(content: Text('已开始下载 collected_data_export.csv')),
+        );
+      }
+    } catch (error) {
+      if (mounted) {
+        messenger.showSnackBar(
+          SnackBar(content: Text('导出失败：${userFacingError(error)}')),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _exportingCsv = false;
+        });
+      }
+    }
+  }
+
   Future<void> _refreshCurrentPage() async {
     setState(() {
       _noticesFuture = _fetchPage();
@@ -87,7 +138,7 @@ class _NoticesPageState extends State<NoticesPage> {
 
   void _startAutoRefresh() {
     _autoRefreshTimer?.cancel();
-    _autoRefreshTimer = Timer.periodic(const Duration(seconds: 10), (_) async {
+    _autoRefreshTimer = Timer.periodic(const Duration(minutes: 5), (_) async {
       if (!mounted) {
         return;
       }
@@ -127,7 +178,7 @@ class _NoticesPageState extends State<NoticesPage> {
       );
     } catch (error) {
       messenger.showSnackBar(
-        SnackBar(content: Text('加载快照失败：$error')),
+        SnackBar(content: Text('加载快照失败：${userFacingError(error)}')),
       );
     }
   }
@@ -138,25 +189,34 @@ class _NoticesPageState extends State<NoticesPage> {
       future: _noticesFuture,
       builder: (context, snapshot) {
         final items = snapshot.data?.items ?? const <NoticeListItemModel>[];
-        return Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              _NoticeHero(
-                items: items,
-                onRefresh: _refresh,
+        return Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 1280),
+            child: Padding(
+              padding: const EdgeInsets.all(20),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _NoticeHero(
+                    items: items,
+                    onRefresh: _refresh,
+                    onExportCsv: () {
+                      _exportCollectedCsv();
+                    },
+                    isExportingCsv: _exportingCsv,
+                  ),
+                  const SizedBox(height: 12),
+                  _NoticeFilterBar(
+                    searchController: _searchController,
+                    onSearch: _onSearch,
+                  ),
+                  const SizedBox(height: 12),
+                  Expanded(
+                    child: _buildBody(context, snapshot),
+                  ),
+                ],
               ),
-              const SizedBox(height: 16),
-              _NoticeFilterBar(
-                searchController: _searchController,
-                onSearch: _onSearch,
-              ),
-              const SizedBox(height: 16),
-              Expanded(
-                child: _buildBody(context, snapshot),
-              ),
-            ],
+            ),
           ),
         );
       },
@@ -185,11 +245,10 @@ class _NoticesPageState extends State<NoticesPage> {
     }
 
     if (snapshot.hasError) {
-      return Card(
-        child: Padding(
-          padding: const EdgeInsets.all(20),
-          child: Text('加载公告列表失败：${snapshot.error}'),
-        ),
+      return AsyncErrorPanel(
+        error: snapshot.error!,
+        title: '加载公告列表失败',
+        onRetry: _refresh,
       );
     }
 
@@ -230,57 +289,147 @@ class _NoticesPageState extends State<NoticesPage> {
 
     return LayoutBuilder(
       builder: (context, constraints) {
+        final isCompact = constraints.maxWidth < 1000;
+        final compactModeSwitcher = Row(
+          children: [
+            Expanded(
+              child: SegmentedButton<bool>(
+                segments: const [
+                  ButtonSegment<bool>(
+                    value: false,
+                    icon: Icon(Icons.view_list_outlined),
+                    label: Text('列表'),
+                  ),
+                  ButtonSegment<bool>(
+                    value: true,
+                    icon: Icon(Icons.article_outlined),
+                    label: Text('详情'),
+                  ),
+                ],
+                selected: {_compactShowDetail},
+                onSelectionChanged: (selected) {
+                  setState(() {
+                    _compactShowDetail = selected.first;
+                  });
+                },
+              ),
+            ),
+          ],
+        );
+
         final content = Column(
           children: [
             Expanded(
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Expanded(
-                    flex: 5,
-                    child: _NoticeListOnly(
-                      items: items,
-                      selectedNoticeId: _selectedNoticeId,
-                      onSelect: _selectNotice,
+              child: isCompact
+                  ? Column(
+                      children: [
+                        compactModeSwitcher,
+                        const SizedBox(height: 10),
+                        Expanded(
+                          child: _compactShowDetail
+                              ? _NoticeDetailPanel(
+                                  noticeId: selectedNotice.id,
+                                  detailFuture: _detailFuture!,
+                                  onOpenSnapshot: _openSnapshot,
+                                  scrollController: _detailScrollController,
+                                  onRetry: () {
+                                    setState(() {
+                                      _detailFuture =
+                                          _repository.fetchNoticeDetail(
+                                        _selectedNoticeId!,
+                                      );
+                                    });
+                                  },
+                                )
+                              : _NoticeListOnly(
+                                  items: items,
+                                  selectedNoticeId: _selectedNoticeId,
+                                  onSelect: (noticeId) {
+                                    _selectNotice(noticeId);
+                                    setState(() {
+                                      _compactShowDetail = true;
+                                    });
+                                  },
+                                  scrollController: _listScrollController,
+                                ),
+                        ),
+                      ],
+                    )
+                  : Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Expanded(
+                          flex: 5,
+                          child: _NoticeListOnly(
+                            items: items,
+                            selectedNoticeId: _selectedNoticeId,
+                            onSelect: _selectNotice,
+                            scrollController: _listScrollController,
+                          ),
+                        ),
+                        const SizedBox(width: 16),
+                        Expanded(
+                          flex: 4,
+                          child: _NoticeDetailPanel(
+                            noticeId: selectedNotice.id,
+                            detailFuture: _detailFuture!,
+                            onOpenSnapshot: _openSnapshot,
+                            scrollController: _detailScrollController,
+                            onRetry: () {
+                              setState(() {
+                                _detailFuture = _repository.fetchNoticeDetail(
+                                  _selectedNoticeId!,
+                                );
+                              });
+                            },
+                          ),
+                        ),
+                      ],
                     ),
-                  ),
-                  const SizedBox(width: 16),
-                  Expanded(
-                    flex: 4,
-                    child: _NoticeDetailPanel(
-                      noticeId: selectedNotice.id,
-                      detailFuture: _detailFuture!,
-                      onOpenSnapshot: _openSnapshot,
-                    ),
-                  ),
-                ],
-              ),
             ),
             const SizedBox(height: 12),
             paginationRow,
           ],
         );
+        final wheelFriendlyContent = Listener(
+          behavior: HitTestBehavior.opaque,
+          onPointerSignal: _handleBodyPointerSignal,
+          child: content,
+        );
 
-        if (constraints.maxWidth < 1000) {
-          return Scrollbar(
-            controller: _horizontalScrollController,
-            interactive: true,
-            thumbVisibility: true,
-            scrollbarOrientation: ScrollbarOrientation.bottom,
-            child: SingleChildScrollView(
-              controller: _horizontalScrollController,
-              scrollDirection: Axis.horizontal,
-              child: SizedBox(
-                width: 1000,
-                child: content,
-              ),
-            ),
-          );
-        }
-
-        return content;
+        return wheelFriendlyContent;
       },
     );
+  }
+
+  void _handleBodyPointerSignal(PointerSignalEvent event) {
+    if (event is! PointerScrollEvent) {
+      return;
+    }
+    final deltaY = event.scrollDelta.dy;
+    if (deltaY == 0) {
+      return;
+    }
+    if (_scrollByWheel(_listScrollController, deltaY)) {
+      return;
+    }
+    _scrollByWheel(_detailScrollController, deltaY);
+  }
+
+  bool _scrollByWheel(ScrollController controller, double deltaY) {
+    if (!controller.hasClients) {
+      return false;
+    }
+    final position = controller.position;
+    final next = (position.pixels + deltaY).clamp(
+      position.minScrollExtent,
+      position.maxScrollExtent,
+    );
+    if (next == position.pixels) {
+      return false;
+    }
+    controller.jumpTo(next);
+    return true;
   }
 
   NoticeListItemModel _syncSelection(List<NoticeListItemModel> items) {
@@ -300,10 +449,14 @@ class _NoticesPageState extends State<NoticesPage> {
 class _NoticeHero extends StatelessWidget {
   final List<NoticeListItemModel> items;
   final Future<void> Function() onRefresh;
+  final VoidCallback onExportCsv;
+  final bool isExportingCsv;
 
   const _NoticeHero({
     required this.items,
     required this.onRefresh,
+    required this.onExportCsv,
+    required this.isExportingCsv,
   });
 
   @override
@@ -316,18 +469,18 @@ class _NoticeHero extends StatelessWidget {
           children: [
             Text(
               '公告中心',
-              style: Theme.of(context).textTheme.headlineMedium?.copyWith(
+              style: Theme.of(context).textTheme.headlineSmall?.copyWith(
                     color: Colors.white,
                   ),
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: 6),
             Text(
-              '按来源、关键词和优先级快速浏览采集结果，左侧筛选线索，右侧深入查看公告详情与快照。',
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+              '按来源、关键词和优先级快速浏览采集结果。',
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
                     color: const Color(0xE6F3F8FF),
                   ),
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: 12),
             _NoticeSummaryBar(items: items),
           ],
         );
@@ -341,9 +494,28 @@ class _NoticeHero extends StatelessWidget {
               icon: const Icon(Icons.refresh),
               label: const Text('刷新'),
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 8),
+            OutlinedButton.icon(
+              onPressed: isExportingCsv ? null : onExportCsv,
+              icon: isExportingCsv
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: Colors.white,
+                      ),
+                    )
+                  : const Icon(Icons.table_chart_outlined),
+              label: Text(isExportingCsv ? '导出中…' : '导出采集 CSV'),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: Colors.white,
+                side: const BorderSide(color: Color(0x66FFFFFF)),
+              ),
+            ),
+            const SizedBox(height: 8),
             _InfoPill(
-              label: '聚焦采集结果',
+              label: '结果',
               value: '${items.length} 条',
             ),
           ],
@@ -351,7 +523,7 @@ class _NoticeHero extends StatelessWidget {
 
         return Container(
           width: double.infinity,
-          padding: const EdgeInsets.all(20),
+          padding: const EdgeInsets.all(14),
           decoration: BoxDecoration(
             gradient: const LinearGradient(
               begin: Alignment.topLeft,
@@ -362,12 +534,12 @@ class _NoticeHero extends StatelessWidget {
                 Color(0xFF13786A),
               ],
             ),
-            borderRadius: BorderRadius.circular(28),
+            borderRadius: BorderRadius.circular(20),
             boxShadow: const [
               BoxShadow(
                 color: Color(0x281D4E89),
-                blurRadius: 30,
-                offset: Offset(0, 16),
+                blurRadius: 20,
+                offset: Offset(0, 10),
               ),
             ],
           ),
@@ -376,14 +548,14 @@ class _NoticeHero extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     content,
-                    const SizedBox(height: 16),
+                    const SizedBox(height: 12),
                     actions,
                   ],
                 )
               : Row(
                   children: [
                     Expanded(child: content),
-                    const SizedBox(width: 16),
+                    const SizedBox(width: 12),
                     actions,
                   ],
                 ),
@@ -410,8 +582,8 @@ class _NoticeSummaryBar extends StatelessWidget {
             .round();
 
     return Wrap(
-      spacing: 16,
-      runSpacing: 16,
+      spacing: 10,
+      runSpacing: 10,
       children: [
         _NoticeMetricCard(
           title: '公告总数',
@@ -508,7 +680,7 @@ class _NoticeMetricCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return SizedBox(
-      width: 190,
+      width: 160,
       child: Container(
         decoration: BoxDecoration(
           gradient: LinearGradient(
@@ -519,37 +691,37 @@ class _NoticeMetricCard extends StatelessWidget {
               Colors.white,
             ],
           ),
-          borderRadius: BorderRadius.circular(20),
+          borderRadius: BorderRadius.circular(16),
         ),
         child: Padding(
-          padding: const EdgeInsets.all(16),
+          padding: const EdgeInsets.all(12),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Row(
                 children: [
                   Container(
-                    width: 40,
-                    height: 40,
+                    width: 34,
+                    height: 34,
                     decoration: BoxDecoration(
                       color: accentColor.withValues(alpha: 0.12),
-                      borderRadius: BorderRadius.circular(14),
+                      borderRadius: BorderRadius.circular(10),
                     ),
-                    child: Icon(icon, color: accentColor),
+                    child: Icon(icon, color: accentColor, size: 18),
                   ),
                   const Spacer(),
                   _MetricPill(accentColor: accentColor),
                 ],
               ),
-              const SizedBox(height: 14),
+              const SizedBox(height: 10),
               Text(
                 title,
-                style: Theme.of(context).textTheme.titleMedium,
+                style: Theme.of(context).textTheme.titleSmall,
               ),
-              const SizedBox(height: 8),
+              const SizedBox(height: 6),
               Text(
                 value,
-                style: Theme.of(context).textTheme.displaySmall?.copyWith(
+                style: Theme.of(context).textTheme.headlineSmall?.copyWith(
                       color: const Color(0xFF0F223D),
                     ),
               ),
@@ -569,14 +741,14 @@ class _MetricPill extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
         color: const Color(0xFFF2F6FC),
         borderRadius: BorderRadius.circular(999),
       ),
       child: Text(
         '实时',
-        style: Theme.of(context).textTheme.labelMedium?.copyWith(
+        style: Theme.of(context).textTheme.labelSmall?.copyWith(
               color: accentColor,
               fontWeight: FontWeight.w700,
             ),
@@ -698,155 +870,129 @@ class _NoticeFilterBarState extends State<_NoticeFilterBar> {
   }
 }
 
-class _NoticeListOnly extends StatefulWidget {
+class _NoticeListOnly extends StatelessWidget {
   final List<NoticeListItemModel> items;
   final int? selectedNoticeId;
   final ValueChanged<int> onSelect;
+  final ScrollController scrollController;
 
   const _NoticeListOnly({
     required this.items,
     required this.selectedNoticeId,
     required this.onSelect,
+    required this.scrollController,
   });
-
-  @override
-  State<_NoticeListOnly> createState() => _NoticeListOnlyState();
-}
-
-class _NoticeListOnlyState extends State<_NoticeListOnly> {
-  final ScrollController _scrollController = ScrollController();
-
-  @override
-  void dispose() {
-    _scrollController.dispose();
-    super.dispose();
-  }
 
   @override
   Widget build(BuildContext context) {
     return Card(
-      child: Scrollbar(
-        controller: _scrollController,
-        interactive: true,
-        thumbVisibility: true,
-        child: ListView.separated(
-          controller: _scrollController,
-          padding: const EdgeInsets.all(12),
-          itemCount: widget.items.length,
-          separatorBuilder: (_, __) => const SizedBox(height: 10),
-          itemBuilder: (context, index) {
-            final item = widget.items[index];
-            final selected = item.id == widget.selectedNoticeId;
+      child: ListView.separated(
+        controller: scrollController,
+        padding: const EdgeInsets.all(12),
+        itemCount: items.length,
+        separatorBuilder: (_, __) => const SizedBox(height: 10),
+        itemBuilder: (context, index) {
+          final item = items[index];
+          final selected = item.id == selectedNoticeId;
 
-            return AnimatedContainer(
-              duration: const Duration(milliseconds: 180),
-              decoration: BoxDecoration(
+          return AnimatedContainer(
+            duration: const Duration(milliseconds: 180),
+            decoration: BoxDecoration(
+              color: selected
+                  ? const Color(0xFFEAF2FF)
+                  : const Color(0xFFFDFEFF),
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(
                 color: selected
-                    ? const Color(0xFFEAF2FF)
-                    : const Color(0xFFFDFEFF),
-                borderRadius: BorderRadius.circular(20),
-                border: Border.all(
-                  color: selected
-                      ? const Color(0xFFBFD3F8)
-                      : const Color(0xFFE4EBF5),
-                ),
+                    ? const Color(0xFFBFD3F8)
+                    : const Color(0xFFE4EBF5),
               ),
-              child: InkWell(
-                borderRadius: BorderRadius.circular(20),
-                onTap: () => widget.onSelect(item.id),
-                child: Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Expanded(
-                            child: Text(
-                              item.title.isEmpty ? '未命名公告' : item.title,
-                              style: Theme.of(context).textTheme.titleMedium,
-                            ),
+            ),
+            child: InkWell(
+              borderRadius: BorderRadius.circular(20),
+              onTap: () => onSelect(item.id),
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Expanded(
+                          child: Text(
+                            item.title.isEmpty ? '未命名公告' : item.title,
+                            style: Theme.of(context).textTheme.titleMedium,
                           ),
-                          const SizedBox(width: 12),
-                          _PriorityPill(isHighPriority: item.isHighPriority),
-                        ],
-                      ),
-                      if (item.summary.isNotEmpty) ...[
-                        const SizedBox(height: 10),
-                        Text(
-                          item.summary,
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                          style: Theme.of(context).textTheme.bodyMedium,
                         ),
+                        const SizedBox(width: 12),
+                        _PriorityPill(isHighPriority: item.isHighPriority),
                       ],
+                    ),
+                    if (item.summary.isNotEmpty) ...[
+                      const SizedBox(height: 10),
+                      Text(
+                        item.summary,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.bodyMedium,
+                      ),
+                    ],
+                    const SizedBox(height: 12),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        _InfoPill(label: '来源', value: item.sourceSite),
+                        _InfoPill(
+                          label: '采集时间',
+                          value: DateFormatter.formatDateTime(item.capturedAt),
+                        ),
+                        _InfoPill(label: '质量分', value: '${item.qualityScore}'),
+                      ],
+                    ),
+                    if (item.matchedKeywords.isNotEmpty) ...[
                       const SizedBox(height: 12),
                       Wrap(
-                        spacing: 8,
-                        runSpacing: 8,
-                        children: [
-                          _InfoPill(label: '来源', value: item.sourceSite),
-                          _InfoPill(
-                            label: '采集时间',
-                            value: DateFormatter.formatDateTime(item.capturedAt),
-                          ),
-                          _InfoPill(
-                              label: '质量分', value: '${item.qualityScore}'),
-                        ],
+                        spacing: 6,
+                        runSpacing: 6,
+                        children: item.matchedKeywords
+                            .map((keyword) => Chip(label: Text(keyword)))
+                            .toList(),
                       ),
-                      if (item.matchedKeywords.isNotEmpty) ...[
-                        const SizedBox(height: 12),
-                        Wrap(
-                          spacing: 6,
-                          runSpacing: 6,
-                          children: item.matchedKeywords
-                              .map((keyword) => Chip(label: Text(keyword)))
-                              .toList(),
-                        ),
-                      ],
                     ],
-                  ),
+                  ],
                 ),
               ),
-            );
-          },
-        ),
+            ),
+          );
+        },
       ),
     );
   }
 }
 
-class _NoticeDetailPanel extends StatefulWidget {
+class _NoticeDetailPanel extends StatelessWidget {
   final int noticeId;
   final Future<NoticeDetailModel> detailFuture;
   final Future<void> Function(BuildContext, NoticeDetailModel, [String?])
       onOpenSnapshot;
+  final VoidCallback onRetry;
+  final ScrollController scrollController;
 
   const _NoticeDetailPanel({
     required this.noticeId,
     required this.detailFuture,
     required this.onOpenSnapshot,
+    required this.onRetry,
+    required this.scrollController,
   });
-
-  @override
-  State<_NoticeDetailPanel> createState() => _NoticeDetailPanelState();
-}
-
-class _NoticeDetailPanelState extends State<_NoticeDetailPanel> {
-  final ScrollController _scrollController = ScrollController();
-
-  @override
-  void dispose() {
-    _scrollController.dispose();
-    super.dispose();
-  }
 
   @override
   Widget build(BuildContext context) {
     return FutureBuilder<NoticeDetailModel>(
-      key: ValueKey(widget.noticeId),
-      future: widget.detailFuture,
+      key: ValueKey(noticeId),
+      future: detailFuture,
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
           return const Card(
@@ -855,11 +1001,10 @@ class _NoticeDetailPanelState extends State<_NoticeDetailPanel> {
         }
 
         if (snapshot.hasError) {
-          return Card(
-            child: Padding(
-              padding: const EdgeInsets.all(20),
-              child: Text('加载公告详情失败：${snapshot.error}'),
-            ),
+          return AsyncErrorPanel(
+            error: snapshot.error!,
+            title: '加载公告详情失败',
+            onRetry: onRetry,
           );
         }
 
@@ -876,120 +1021,119 @@ class _NoticeDetailPanelState extends State<_NoticeDetailPanel> {
         return Card(
           child: Padding(
             padding: const EdgeInsets.all(20),
-            child: Scrollbar(
-              controller: _scrollController,
-              interactive: true,
-              thumbVisibility: true,
-              child: ListView(
-                controller: _scrollController,
-                padding: EdgeInsets.zero,
-                children: [
-                  Text(
-                    detail.title.isEmpty ? '未命名公告' : detail.title,
-                    style: Theme.of(context).textTheme.titleLarge,
-                  ),
-                  const SizedBox(height: 12),
-                  Wrap(
-                    spacing: 12,
-                    runSpacing: 8,
-                    children: [
-                      _MetaTag(label: '来源站点', value: detail.sourceSite),
-                      _MetaTag(
-                        label: '采集时间',
-                        value: DateFormatter.formatDateTime(detail.capturedAt),
-                      ),
-                      _MetaTag(label: '质量分', value: '${detail.qualityScore}'),
-                      _MetaTag(
-                        label: '发布时间',
-                        value: detail.publishedAt == null
-                            ? '暂无'
-                            : DateFormatter.formatDateTime(
-                                detail.publishedAt,
-                                fallback: '暂无',
-                              ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 14),
-                  SelectableText(
-                    detail.sourceUrl,
-                    style: const TextStyle(
-                      color: Color(0xFF1F4B99),
-                      decoration: TextDecoration.underline,
+            child: ListView(
+              controller: scrollController,
+              padding: EdgeInsets.zero,
+              children: [
+                Text(
+                  detail.title.isEmpty ? '未命名公告' : detail.title,
+                  style: Theme.of(context).textTheme.titleLarge,
+                ),
+                const SizedBox(height: 12),
+                Wrap(
+                  spacing: 12,
+                  runSpacing: 8,
+                  children: [
+                    _MetaTag(label: '来源站点', value: detail.sourceSite),
+                    _MetaTag(
+                      label: '采集时间',
+                      value: DateFormatter.formatDateTime(detail.capturedAt),
                     ),
-                  ),
-                  if (detail.matchedKeywords.isNotEmpty) ...[
-                    const SizedBox(height: 16),
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
-                      children: detail.matchedKeywords
-                          .map((keyword) => ActionChip(
-                                label: Text(keyword),
-                                avatar: const Icon(Icons.search, size: 16),
-                                onPressed: () => widget.onOpenSnapshot(
-                                    context, detail, keyword),
-                                tooltip: '在快照中查找此关键词',
-                              ))
-                          .toList(),
+                    _MetaTag(label: '质量分', value: '${detail.qualityScore}'),
+                    _MetaTag(
+                      label: '发布时间',
+                      value: detail.publishedAt == null
+                          ? '暂无'
+                          : DateFormatter.formatDateTime(
+                              detail.publishedAt,
+                              fallback: '暂无',
+                            ),
                     ),
                   ],
+                ),
+                const SizedBox(height: 14),
+                SelectableText(
+                  detail.sourceUrl,
+                  style: const TextStyle(
+                    color: Color(0xFF1F4B99),
+                    decoration: TextDecoration.underline,
+                  ),
+                ),
+                if (detail.matchedKeywords.isNotEmpty) ...[
                   const SizedBox(height: 16),
-                  Row(
-                    children: [
-                      FilledButton.tonal(
-                        onPressed: () => widget.onOpenSnapshot(context, detail),
-                        child: const Text('查看快照'),
-                      ),
-                      const SizedBox(width: 12),
-                      if (detail.sourceUrl.isNotEmpty)
-                        OutlinedButton.icon(
-                          onPressed: () async {
-                            final uri = Uri.parse(detail.sourceUrl);
-                            try {
-                              await launchUrl(uri,
-                                  mode: LaunchMode.externalApplication);
-                            } catch (e) {
-                              if (context.mounted) {
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  SnackBar(content: Text('无法打开原文链接: $uri')),
-                                );
-                              }
-                            }
-                          },
-                          icon: const Icon(Icons.open_in_browser, size: 16),
-                          label: const Text('查看原文'),
-                        )
-                      else
-                        const OutlinedButton(
-                          onPressed: null,
-                          child: Text('无原文链接'),
-                        ),
-                    ],
-                  ),
-                  const SizedBox(height: 18),
-                  Text(
-                    '正文内容',
-                    style: Theme.of(context).textTheme.titleMedium,
-                  ),
-                  const SizedBox(height: 10),
-                  Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.all(16),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFF7FAFD),
-                      borderRadius: BorderRadius.circular(20),
-                      border: Border.all(color: const Color(0xFFE3EAF5)),
-                    ),
-                    child: Text(
-                      detail.contentText.isEmpty
-                          ? '当前暂无正文内容。'
-                          : detail.contentText,
-                      style: Theme.of(context).textTheme.bodyMedium,
-                    ),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: detail.matchedKeywords
+                        .map((keyword) => ActionChip(
+                              label: Text(keyword),
+                              avatar: const Icon(Icons.search, size: 16),
+                              onPressed: () =>
+                                  onOpenSnapshot(context, detail, keyword),
+                              tooltip: '在快照中查找此关键词',
+                            ))
+                        .toList(),
                   ),
                 ],
-              ),
+                const SizedBox(height: 16),
+                Row(
+                  children: [
+                    FilledButton.tonal(
+                      onPressed: () => onOpenSnapshot(context, detail),
+                      child: const Text('查看快照'),
+                    ),
+                    const SizedBox(width: 12),
+                    if (detail.sourceUrl.isNotEmpty)
+                      OutlinedButton.icon(
+                        onPressed: () async {
+                          final uri = Uri.parse(detail.sourceUrl);
+                          try {
+                            await launchUrl(uri,
+                                mode: LaunchMode.externalApplication);
+                          } catch (e) {
+                            if (context.mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text(
+                                    '无法打开原文链接（$uri）：${userFacingError(e)}',
+                                  ),
+                                ),
+                              );
+                            }
+                          }
+                        },
+                        icon: const Icon(Icons.open_in_browser, size: 16),
+                        label: const Text('查看原文'),
+                      )
+                    else
+                      const OutlinedButton(
+                        onPressed: null,
+                        child: Text('无原文链接'),
+                      ),
+                  ],
+                ),
+                const SizedBox(height: 18),
+                Text(
+                  '正文内容',
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
+                const SizedBox(height: 10),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFF7FAFD),
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(color: const Color(0xFFE3EAF5)),
+                  ),
+                  child: Text(
+                    detail.contentText.isEmpty
+                        ? '当前暂无正文内容。'
+                        : detail.contentText,
+                    style: Theme.of(context).textTheme.bodyMedium,
+                  ),
+                ),
+              ],
             ),
           ),
         );

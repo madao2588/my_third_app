@@ -152,18 +152,40 @@ frontend/
 - `/v1/templates/tasks/{id}`
 - `/v1/templates/tasks/{id}/use`
 
+### 其它（节选）
+
+- `/v1/data/export/csv` — 采集数据 CSV 导出（公告中心等）
+- `/v1/keyword-rules` — 关键字规则
+- `/v1/auth/login`、`/v1/auth/me` — 登录与会话
+
 ## 五、本地运行
 
 ```bash
+cd frontend   # 或仓库内的 crawler_system/frontend
 flutter pub get
 flutter run -d chrome
 ```
 
-如果只做静态检查：
+**后端地址**：默认 `http://127.0.0.1:8000`，与 `lib/core/config/app_config.dart` 中的 `AppConfig.apiBaseUrl` 一致；若端口或主机不同，请改该常量后重新运行。
+
+**演示登录**：与后端默认管理员一致，账号 **`madao`**、密码 **`666666`**（见登录页底部说明）。
+
+若 Web 端口被占用，可指定端口，例如：
+
+```bash
+flutter run -d chrome --web-port=8090
+```
+
+静态检查与单元测试：
 
 ```bash
 flutter analyze
+flutter test
 ```
+
+同仓库下 **后端** 的接口冒烟、登录、登出后会话失效、CSV 导出、**任务创建/读取/删除**，以及日志 / 公告 / 统计 / 看板 / 关键字 / 模板等只读接口与 404 行为单测在 `../server/tests/` 目录，使用 `pytest` 执行；其中 HTTP 用例通过 **会话级共享的 `TestClient`** 只启动一次应用生命周期，避免在 Windows 上多次开关 `TestClient` 时 APScheduler 与事件循环冲突。
+
+前端 `flutter test` 中还包含 **`ApiClient` 与 `http.MockClient`** 的单元测试（成功 JSON、错误 `ApiException`、`postJson` 头与 body），以及对 **`HttpTaskRepository` / `HttpNoticeRepository`** 的 Mock 解析用例，均无需启动真实后端。
 
 ## 六、当前前端设计特点
 
@@ -184,8 +206,7 @@ flutter analyze
 
 ### 1. 模板治理
 
-- 模板搜索
-- 模板排序
+- 模板目录页已支持**搜索与排序**；可继续做热门模板、保存前校验提示等
 - 热门模板
 - 模板校验提示
 

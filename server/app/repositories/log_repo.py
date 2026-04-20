@@ -1,6 +1,6 @@
 from collections.abc import Sequence
 
-from sqlalchemy import distinct, func, select
+from sqlalchemy import distinct, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.log import LogEntry
@@ -17,12 +17,14 @@ class LogRepository:
         message: str,
         task_id: int | None = None,
         error_stack: str | None = None,
+        run_summary: str | None = None,
     ) -> LogEntry:
         log = LogEntry(
             task_id=task_id,
             level=level,
             message=message,
             error_stack=error_stack,
+            run_summary=run_summary,
         )
         self.session.add(log)
         await self.session.commit()
@@ -36,22 +38,48 @@ class LogRepository:
         page_size: int,
         task_id: int | None = None,
         level: str | None = None,
+        message_contains: str | None = None,
+        only_summary: bool = False,
     ) -> tuple[Sequence[LogEntry], int]:
         filters = []
         if task_id is not None:
             filters.append(LogEntry.task_id == task_id)
         if level is not None:
             filters.append(LogEntry.level == level)
+        if only_summary:
+            filters.append(
+                or_(
+                    LogEntry.run_summary.is_not(None),
+                    LogEntry.message.contains(" summary:"),
+                    LogEntry.message.contains("运行摘要"),
+                    func.coalesce(LogEntry.error_stack, "").contains(
+                        '"kind":"run_summary"'
+                    ),
+                    func.coalesce(LogEntry.error_stack, "").contains(
+                        '"kind": "run_summary"'
+                    ),
+                )
+            )
+        if message_contains:
+            needle = message_contains.strip()
+            if needle:
+                filters.append(
+                    or_(
+                        LogEntry.message.contains(needle),
+                        func.coalesce(LogEntry.error_stack, "").contains(needle),
+                    )
+                )
 
         total_statement = select(func.count()).select_from(LogEntry)
         if filters:
             total_statement = total_statement.where(*filters)
         total = await self.session.scalar(total_statement) or 0
 
+        statement = select(LogEntry)
+        if filters:
+            statement = statement.where(*filters)
         statement = (
-            select(LogEntry)
-            .where(*filters)
-            .order_by(LogEntry.id.desc())
+            statement.order_by(LogEntry.id.desc())
             .offset((page - 1) * page_size)
             .limit(page_size)
         )

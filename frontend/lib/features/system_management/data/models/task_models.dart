@@ -93,6 +93,7 @@ class TaskLogItemModel {
   final String level;
   final String message;
   final String? errorStack;
+  final Map<String, dynamic>? runSummary;
   final String createdAt;
 
   const TaskLogItemModel({
@@ -101,6 +102,7 @@ class TaskLogItemModel {
     required this.level,
     required this.message,
     required this.errorStack,
+    required this.runSummary,
     required this.createdAt,
   });
 
@@ -111,6 +113,9 @@ class TaskLogItemModel {
       level: json['level']?.toString() ?? '',
       message: json['message']?.toString() ?? '',
       errorStack: json['error_stack']?.toString(),
+      runSummary: json['run_summary'] is Map<String, dynamic>
+          ? json['run_summary'] as Map<String, dynamic>
+          : null,
       createdAt: json['created_at']?.toString() ?? '',
     );
   }

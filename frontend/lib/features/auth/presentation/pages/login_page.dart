@@ -3,6 +3,8 @@ import 'dart:typed_data';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 
+import '../../../../core/utils/user_facing_error.dart';
+
 class LoginPage extends StatefulWidget {
   final Future<void> Function(
     String userName,
@@ -21,7 +23,7 @@ class LoginPage extends StatefulWidget {
 
 class _LoginPageState extends State<LoginPage> {
   final _formKey = GlobalKey<FormState>();
-  final _userNameController = TextEditingController(text: '运营管理员');
+  final _userNameController = TextEditingController(text: 'madao');
   final _passwordController = TextEditingController();
 
   Uint8List? _avatarBytes;
@@ -79,7 +81,7 @@ class _LoginPageState extends State<LoginPage> {
     } on Object catch (error) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('登录失败：$error')),
+          SnackBar(content: Text('登录失败：${userFacingError(error)}')),
         );
       }
     } finally {
@@ -297,7 +299,7 @@ class _LoginPageState extends State<LoginPage> {
                                 ),
                                 const SizedBox(height: 8),
                                 const Text(
-                                  '默认演示账号：运营管理员 / admin123',
+                                  '默认演示账号：madao / 666666',
                                 ),
                                 const SizedBox(height: 20),
                                 SizedBox(

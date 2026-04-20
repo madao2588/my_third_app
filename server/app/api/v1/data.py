@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import Response
 
 from app.dependencies import get_data_service
 from app.schemas.common import ApiResponse, PageData
@@ -6,6 +7,22 @@ from app.schemas.data import DataListItem, DataRead, SnapshotRead
 from app.services.data_service import DataService
 
 router = APIRouter(prefix="/data", tags=["data"])
+
+
+@router.get("/export/csv")
+async def export_collected_data_csv(
+    task_id: int | None = Query(default=None),
+    limit: int = Query(default=2000, ge=1, le=10000),
+    service: DataService = Depends(get_data_service),
+) -> Response:
+    payload = await service.export_collected_data_csv(task_id=task_id, limit=limit)
+    return Response(
+        content=payload,
+        media_type="text/csv; charset=utf-8",
+        headers={
+            "Content-Disposition": 'attachment; filename="collected_data_export.csv"',
+        },
+    )
 
 
 @router.get("", response_model=ApiResponse[PageData[DataListItem]])
